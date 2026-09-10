@@ -9,6 +9,7 @@ import { TokenMock } from "@1inch/solidity-utils/contracts/mocks/TokenMock.sol";
 
 import { MockTaker } from "@1inch/swap-vm/test/mocks/MockTaker.sol";
 import { ISwapVM } from "@1inch/swap-vm/src/interfaces/ISwapVM.sol";
+import { MakerTraits } from "@1inch/swap-vm/src/libs/MakerTraits.sol";
 import { MakerTraitsLib } from "@1inch/swap-vm/src/libs/MakerTraits.sol";
 import { TakerTraitsLib } from "@1inch/swap-vm/src/libs/TakerTraits.sol";
 import { XYCSwap } from "@1inch/swap-vm/src/instructions/XYCSwap.sol";
@@ -23,13 +24,19 @@ import { ExposureOracle } from "../src/oracle/ExposureOracle.sol";
 
 /**
  * @title AqueductDemo
- * @notice End-to-end local demo of the ExposureGate opcode as real, broadcast on-chain
+ * @notice End-to-end local demo of the ExposureGate opcode, as real broadcast on-chain
  *         transactions -- not `forge test` pranks. Deploys the real 1inch Aqua contract and a
  *         modified SwapVM router, ships real maker liquidity into it, then swaps through the
  *         gate three times as the maker's live cross-protocol exposure climbs:
  *           1. low exposure   -> normal fill, gate is a no-op
  *           2. mid exposure   -> derated fill, taker gets strictly less (or pays strictly more)
  *           3. halt exposure  -> swap reverts outright, no fill at all
+ *
+ *         Writes every deployed address (and the maker's SwapVM order, needed to call `swap`
+ *         directly) to `frontend/public/deployment.json`, so the Next.js frontend can pick up
+ *         this exact deployment without any manual copy-pasting. Run `AqueductV4Demo.s.sol`
+ *         afterwards (a separate script -- see its own doc comment for why) to additionally wire
+ *         up a Uniswap v4 pool backed by this same maker strategy.
  *
  * @dev 1inch's own repos ship no real mainnet/testnet Aqua or SwapVM deployment addresses (see
  *      lib/aqua/config/constants.json and lib/swap-vm/config/constants.json -- both are
@@ -85,24 +92,30 @@ contract AqueductDemo is Script, ExposureAquaOpcodes {
         ExposureAwareAquaRouter swapVM = new ExposureAwareAquaRouter(
             address(aqua), address(0), msg.sender, "Aqueduct", "1.0.0"
         );
-        TokenMock tokenIn = new TokenMock("Aqueduct Demo USDC", "aUSDC");
-        TokenMock tokenOut = new TokenMock("Aqueduct Demo WETH", "aWETH");
+        TokenMock tokenA = new TokenMock("Aqueduct Demo USDC", "aUSDC");
+        TokenMock tokenB = new TokenMock("Aqueduct Demo WETH", "aWETH");
         MockTaker takerContract = new MockTaker(aqua, swapVM, taker);
 
         payable(maker).transfer(1 ether);
         payable(taker).transfer(1 ether);
         payable(keeper).transfer(1 ether);
 
-        tokenIn.mint(maker, INITIAL_LIQUIDITY);
-        tokenOut.mint(maker, INITIAL_LIQUIDITY);
-        tokenIn.mint(address(takerContract), SWAP_AMOUNT * 100);
+        tokenA.mint(maker, INITIAL_LIQUIDITY);
+        tokenB.mint(maker, INITIAL_LIQUIDITY);
+        tokenA.mint(address(takerContract), SWAP_AMOUNT * 100);
         vm.stopBroadcast();
+
+        // v4's currency ordering requirement (currency0 < currency1) is decided once here so
+        // AqueductV4Demo.s.sol can read tokenIn/tokenOut back from deployment.json and reuse the
+        // same ordering without re-deriving it.
+        (TokenMock tokenIn, TokenMock tokenOut) =
+            address(tokenA) < address(tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
 
         console2.log("Aqua:                   ", address(aqua));
         console2.log("ExposureOracle:         ", address(oracle));
         console2.log("ExposureAwareAquaRouter:", address(swapVM));
-        console2.log("tokenIn (aUSDC):        ", address(tokenIn));
-        console2.log("tokenOut (aWETH):       ", address(tokenOut));
+        console2.log("tokenIn:                ", address(tokenIn));
+        console2.log("tokenOut:               ", address(tokenOut));
 
         // ---- Build the maker's program: an XYC-curve AMM gated by live cross-protocol
         //      exposure, read from `oracle` at swap time. ----
@@ -136,7 +149,8 @@ contract AqueductDemo is Script, ExposureAquaOpcodes {
             program: program
         }));
 
-        // ---- Maker ships real liquidity into Aqua. ----
+        // ---- Maker ships real liquidity into Aqua -- this same shipped strategy also backs the
+        //      Uniswap v4 pool that AqueductV4Demo.s.sol wires up afterwards. ----
         vm.startBroadcast(MAKER_PK);
         tokenIn.approve(address(aqua), type(uint256).max);
         tokenOut.approve(address(aqua), type(uint256).max);
@@ -181,6 +195,12 @@ contract AqueductDemo is Script, ExposureAquaOpcodes {
             console2.log("Swap reverted as expected against live on-chain state. Revert data:");
             console2.logBytes(reason);
         }
+
+        // Reset to a safe reading so the frontend (and AqueductV4Demo.s.sol) start from a normal,
+        // unhalted state.
+        _pushExposure(oracle, keeper, maker, 1_000);
+
+        _writeDeploymentJson(aqua, oracle, swapVM, tokenIn, tokenOut, order, strategyHash, maker, keeper);
     }
 
     function _pushExposure(ExposureOracle oracle, address keeper, address maker, uint64 exposureBps) internal {
@@ -231,5 +251,41 @@ contract AqueductDemo is Script, ExposureAquaOpcodes {
             instructionsArgs: "",
             signature: ""
         }));
+    }
+
+    function _writeDeploymentJson(
+        Aqua aqua,
+        ExposureOracle oracle,
+        ExposureAwareAquaRouter swapVM,
+        TokenMock tokenIn,
+        TokenMock tokenOut,
+        ISwapVM.Order memory order,
+        bytes32 strategyHash,
+        address maker,
+        address keeper
+    ) internal {
+        string memory json = string.concat(
+            "{",
+            '"chainId":', vm.toString(block.chainid), ",",
+            '"maker":"', vm.toString(maker), '",',
+            '"keeper":"', vm.toString(keeper), '",',
+            '"aqua":"', vm.toString(address(aqua)), '",',
+            '"oracle":"', vm.toString(address(oracle)), '",',
+            '"swapVM":"', vm.toString(address(swapVM)), '",',
+            '"tokenIn":"', vm.toString(address(tokenIn)), '",',
+            '"tokenOut":"', vm.toString(address(tokenOut)), '",',
+            '"strategyHash":"', vm.toString(strategyHash), '",',
+            '"maxExposureBps":', vm.toString(uint256(MAX_EXPOSURE_BPS)), ",",
+            '"haltExposureBps":', vm.toString(uint256(HALT_EXPOSURE_BPS)), ",",
+            '"order":{',
+            '"maker":"', vm.toString(order.maker), '",',
+            '"traits":"', vm.toString(MakerTraits.unwrap(order.traits)), '",',
+            '"data":"', vm.toString(order.data), '"',
+            "}",
+            "}"
+        );
+
+        vm.writeFile("frontend/public/deployment.json", json);
+        console2.log("\nWrote frontend/public/deployment.json");
     }
 }

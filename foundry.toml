@@ -2,10 +2,23 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-solc_version = "0.8.30"
+# No pinned solc_version: swap-vm/aqua strictly require 0.8.30 while v4-core's PoolManager.sol
+# strictly requires 0.8.26. Leaving auto-detection on lets forge compile each file with whatever
+# exact version its own pragma demands, instead of forcing one version project-wide.
 optimizer = true
 optimizer_runs = 700
 via_ir = true
+# PoolManager wraps every hook-callback revert in Hooks.sol's CustomRevert.WrappedError before it
+# bubbles up (see CustomRevert.bubbleUpAndRevertWith). Without this, vm.expectRevert can't match
+# the hook's own custom errors -- v4-core's own foundry.toml sets this for the same reason.
+allow_internal_expect_revert = true
+# "read" for out/ is needed by vm.deployCode (reads the compiled artifact by path); read-write for
+# frontend/public/ lets the demo scripts emit (and, for AqueductV4Demo, read back) deployment.json
+# for the Next.js app to consume.
+fs_permissions = [
+    { access = "read", path = "out/" },
+    { access = "read-write", path = "frontend/public/" },
+]
 
 remappings = [
     "forge-std/=lib/forge-std/src/",
@@ -13,6 +26,19 @@ remappings = [
     "@1inch/aqua/=lib/aqua/",
     "@openzeppelin/contracts/=lib/swap-vm/node_modules/@openzeppelin/contracts/",
     "@1inch/solidity-utils/=lib/swap-vm/node_modules/@1inch/solidity-utils/",
+    "uniswap-hooks/=lib/uniswap-hooks/",
+    "@uniswap/v4-core/=lib/uniswap-hooks/lib/v4-core/",
+    "@uniswap/v4-periphery/=lib/uniswap-hooks/lib/v4-periphery/",
+]
+
+# v4-core's own foundry.toml uses optimizer_runs = 44444444; PoolManager.sol hits a stack-too-deep
+# Yul error under our project-wide 700 runs setting, so match v4-core's own value for that file
+# via a dedicated compiler profile (a restriction must match some profile's exact settings).
+additional_compiler_profiles = [
+    { name = "v4core", via_ir = true, optimizer_runs = 44444444 },
+]
+compilation_restrictions = [
+    { paths = "lib/uniswap-hooks/lib/v4-core/src/PoolManager.sol", optimizer_runs = 44444444 },
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
