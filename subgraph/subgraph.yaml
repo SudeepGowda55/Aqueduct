@@ -8,21 +8,25 @@ schema:
 dataSources:
   - kind: ethereum
     name: Aqua
-    network: mainnet # replace with the network Aqua is actually deployed on
+    # "base-sepolia" follows Graph Studio's usual "<chain>-sepolia" naming (confirmed for e.g.
+    # "arbitrum-sepolia"), but wasn't independently confirmed for Base specifically -- double
+    # check against Graph Studio's own network list at deploy time; it fails loudly and
+    # immediately if wrong, so this is a safe field to leave as a strong guess.
+    network: base-sepolia
     source:
-      # 1inch's own repos ship no real Aqua deployment address (see lib/aqua/config/constants.json
-      # -- a zero-address placeholder for local anvil). Fill this in once Aqua is deployed to a
-      # real network, or point it at your own local deployment for testing.
-      address: "0x0000000000000000000000000000000000000000"
+      # Real Aqua deployment on Base Sepolia (see the project README's "Live on Base Sepolia"
+      # section) -- deployed by script/AqueductDemo.s.sol, verified via a real swap through it
+      # before this address was filled in here.
+      address: "0x2e706D0c3a6d9C8d62Bb3276Ff9a1a04e9108461"
       abi: Aqua
-      startBlock: 0 # replace with Aqua's actual deployment block to avoid a full historical sync
+      startBlock: 46640685 # Aqua's actual deployment block on Base Sepolia
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
       language: wasm/assemblyscript
       entities:
+        - Strategy
         - StrategyBalance
-        - MakerTokenExposure
         - AquaBalanceEvent
       abis:
         - name: Aqua

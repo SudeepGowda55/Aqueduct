@@ -21,7 +21,7 @@ declare global {
   }
 }
 
-const LOCAL_ANVIL_CHAIN_ID = 31337;
+const BASE_SEPOLIA_CHAIN_ID = 84532;
 
 interface WalletState {
   address: string | null;
@@ -47,7 +47,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const connect = useCallback(async () => {
     if (typeof window === "undefined" || !window.ethereum) {
-      setError("No wallet found. Install MetaMask (or another injected wallet) and point it at http://127.0.0.1:8545, chain id 31337.");
+      setError("No wallet found. Install MetaMask (or another injected wallet) and switch it to Base Sepolia (chain id 84532).");
       return;
     }
     setIsConnecting(true);
@@ -99,7 +99,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
   }, [connect, disconnect]);
 
-  const isWrongNetwork = chainId !== null && chainId !== LOCAL_ANVIL_CHAIN_ID;
+  const isWrongNetwork = chainId !== null && chainId !== BASE_SEPOLIA_CHAIN_ID;
 
   const value = useMemo(
     () => ({ address, chainId, provider, signer, isConnecting, error, isWrongNetwork, connect, disconnect }),

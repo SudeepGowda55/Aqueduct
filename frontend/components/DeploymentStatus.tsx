@@ -15,14 +15,13 @@ export function DeploymentStatus() {
         <p className="font-medium">Could not load the deployment.</p>
         <p className="mt-1 text-xs text-red-400">{error}</p>
         <p className="mt-3 text-xs text-neutral-400">
-          Run the demo scripts against a local anvil node first:
+          Run the demo scripts against Base Sepolia (or redeploy fresh) first:
         </p>
         <pre className="mt-1 overflow-x-auto rounded-lg bg-neutral-950 p-3 text-xs text-neutral-300">
-{`anvil
-forge script script/AqueductDemo.s.sol --rpc-url http://127.0.0.1:8545 \\
-  --private-key <funded anvil account> --broadcast
-forge script script/AqueductV4Demo.s.sol --rpc-url http://127.0.0.1:8545 \\
-  --private-key <funded anvil account> --broadcast`}
+{`forge script script/AqueductDemo.s.sol --rpc-url <base sepolia rpc> \\
+  --private-key <funded base sepolia account> --broadcast --slow
+forge script script/AqueductV4Demo.s.sol --rpc-url <base sepolia rpc> \\
+  --private-key <funded base sepolia account> --broadcast --slow`}
         </pre>
         <button
           onClick={reload}

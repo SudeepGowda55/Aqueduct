@@ -96,20 +96,23 @@ contract AqueductDemo is Script, ExposureAquaOpcodes {
         TokenMock tokenB = new TokenMock("Aqueduct Demo WETH", "aWETH");
         MockTaker takerContract = new MockTaker(aqua, swapVM, taker);
 
-        payable(maker).transfer(1 ether);
-        payable(taker).transfer(1 ether);
-        payable(keeper).transfer(1 ether);
+        // Small amounts: enough for a handful of transactions' gas, but not wasteful of real
+        // testnet ETH when this runs against a real network instead of a local anvil node.
+        payable(maker).transfer(0.01 ether);
+        payable(taker).transfer(0.01 ether);
+        payable(keeper).transfer(0.01 ether);
+
+        // v4's currency ordering requirement (currency0 < currency1) is decided here, before any
+        // minting, so the taker gets funded in whichever token actually ends up being `tokenIn`
+        // (this ordering is address-dependent, not fixed to tokenA/tokenB) -- also lets
+        // AqueductV4Demo.s.sol read tokenIn/tokenOut back from deployment.json unambiguously.
+        (TokenMock tokenIn, TokenMock tokenOut) =
+            address(tokenA) < address(tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
 
         tokenA.mint(maker, INITIAL_LIQUIDITY);
         tokenB.mint(maker, INITIAL_LIQUIDITY);
-        tokenA.mint(address(takerContract), SWAP_AMOUNT * 100);
+        tokenIn.mint(address(takerContract), SWAP_AMOUNT * 100);
         vm.stopBroadcast();
-
-        // v4's currency ordering requirement (currency0 < currency1) is decided once here so
-        // AqueductV4Demo.s.sol can read tokenIn/tokenOut back from deployment.json and reuse the
-        // same ordering without re-deriving it.
-        (TokenMock tokenIn, TokenMock tokenOut) =
-            address(tokenA) < address(tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
 
         console2.log("Aqua:                   ", address(aqua));
         console2.log("ExposureOracle:         ", address(oracle));

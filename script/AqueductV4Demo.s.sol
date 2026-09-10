@@ -50,10 +50,19 @@ contract AqueductV4Demo is Script {
     uint256 internal constant HOOK_WORKING_CAPITAL = 50_000e18;
     int24 internal constant TICK_SPACING = 60;
 
+    uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84532;
+    // Uniswap's own real deployment on Base Sepolia (confirmed verified on BaseScan before use:
+    // "PoolManager" / "PoolSwapTest" respectively, both with thousands of prior transactions) --
+    // https://developers.uniswap.org/contracts/v4/deployments. Using these instead of deploying
+    // our own is both a stronger integration (real v4 core, not a redeploy) and cheaper.
+    address internal constant BASE_SEPOLIA_POOL_MANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
+    address internal constant BASE_SEPOLIA_POOL_SWAP_TEST = 0x8B5bcC363ddE2614281aD875bad385E0A785D3B9;
+
     // The canonical deterministic CREATE2 deployer proxy (0age/Arachnid's), pre-deployed at
     // genesis on anvil and virtually every EVM chain -- forge script routes any salted `new`
     // through it when broadcasting, so hook-address mining must target this deployer, not the
-    // broadcasting EOA (see HookMiner's own doc comment).
+    // broadcasting EOA (see HookMiner's own doc comment). Confirmed present on Base Sepolia too
+    // (real bytecode via `cast code`) before relying on it here.
     address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     function run() external {
@@ -70,9 +79,12 @@ contract AqueductV4Demo is Script {
             data: vm.parseJsonBytes(json, ".order.data")
         });
 
+        bool isBaseSepolia = block.chainid == BASE_SEPOLIA_CHAIN_ID;
+
         vm.startBroadcast();
-        IPoolManager poolManager =
-            IPoolManager(vm.deployCode("out/PoolManager.sol/PoolManager.json", abi.encode(msg.sender)));
+        IPoolManager poolManager = isBaseSepolia
+            ? IPoolManager(BASE_SEPOLIA_POOL_MANAGER)
+            : IPoolManager(vm.deployCode("out/PoolManager.sol/PoolManager.json", abi.encode(msg.sender)));
 
         uint160 flags = uint160(
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
@@ -94,7 +106,8 @@ contract AqueductV4Demo is Script {
         });
         poolManager.initialize(poolKey, TickMath.getSqrtPriceAtTick(0));
 
-        PoolSwapTest swapRouter = new PoolSwapTest(poolManager);
+        PoolSwapTest swapRouter =
+            isBaseSepolia ? PoolSwapTest(BASE_SEPOLIA_POOL_SWAP_TEST) : new PoolSwapTest(poolManager);
 
         // Seed the hook's working-capital float (see AquaV4Hook's contract-level comment): a
         // plain ERC20 transfer, no special deposit function needed.

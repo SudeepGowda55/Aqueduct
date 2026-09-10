@@ -52,9 +52,9 @@ export default function Home() {
             </div>
 
             <footer className="mt-10 border-t border-neutral-900 pt-6 text-xs text-neutral-600">
-              Local demo frontend -- talks to a local anvil node at http://127.0.0.1:8545 (chain id
-              31337). See the project README for the full architecture and how each piece fits
-              together.
+              Live on Base Sepolia (chain id 84532) -- get testnet ETH from a Base Sepolia faucet
+              to connect and swap. See the project README for the full architecture and how each
+              piece fits together.
             </footer>
           </div>
         </ActivityLogProvider>

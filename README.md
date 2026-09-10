@@ -18,6 +18,28 @@ unsigned SwapVM program already authorized — never trade beyond it. This is th
 mirror of SwapVM's own `OraclePriceAdjuster` instruction, which is one-directional in the opposite
 sense (only ever improves the taker's price, never worsens it).
 
+## Live on Base Sepolia
+
+Every contract below is really deployed and really exercised on Base Sepolia (chain id `84532`)
+— not a local-only claim. Both the direct SwapVM path and the Uniswap v4 path were each verified
+with a real, separately-submitted swap transaction (via `cast`) before being wired into the
+frontend.
+
+| Contract | Address |
+|---|---|
+| `Aqua` | [`0x2e706D0c3a6d9C8d62Bb3276Ff9a1a04e9108461`](https://sepolia.basescan.org/address/0x2e706D0c3a6d9C8d62Bb3276Ff9a1a04e9108461) |
+| `ExposureOracle` | [`0xF8c7ccE6a80140b6C6CBA4fE9CA172B6C544fe75`](https://sepolia.basescan.org/address/0xF8c7ccE6a80140b6C6CBA4fE9CA172B6C544fe75) |
+| `ExposureAwareAquaRouter` (SwapVM) | [`0xC008DD3D1293543d5FA7AD6eED285eD45E3d7cCc`](https://sepolia.basescan.org/address/0xC008DD3D1293543d5FA7AD6eED285eD45E3d7cCc) |
+| `AquaV4Hook` | [`0x0240F045c890f6255B57bD3EA03C521e518c6A88`](https://sepolia.basescan.org/address/0x0240F045c890f6255B57bD3EA03C521e518c6A88) |
+
+The v4 side deliberately does **not** deploy its own `PoolManager` or swap router — it uses
+Uniswap's own real Base Sepolia deployment ([`PoolManager` at `0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408`](https://sepolia.basescan.org/address/0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408),
+[`PoolSwapTest` at `0x8B5bcC363ddE2614281aD875bad385E0A785D3B9`](https://sepolia.basescan.org/address/0x8B5bcC363ddE2614281aD875bad385E0A785D3B9))
+— confirmed verified on BaseScan (contract names, constructor args, and transaction history all
+cross-checked) before a single real transaction was sent through them. Only `AquaV4Hook` itself is
+freshly deployed, since it has to be: it's this project's own contract, CREATE2-mined to encode
+the right permission flags in its address the way every v4 hook must.
+
 ## Where to look
 
 | What | File |
@@ -38,16 +60,19 @@ sense (only ever improves the taker's price, never worsens it).
 (which itself bundles a matching `v4-core`/`v4-periphery`) is OpenZeppelin's real, current Uniswap
 v4 hooks utility library — all pulled in as dependencies, not reimplemented or mocked.
 
-## Why a local chain, not a mainnet fork
+## Why Aqua/SwapVM get redeployed fresh (on Base Sepolia, not just locally)
 
 1inch's own repos ship no real mainnet or testnet Aqua/SwapVM deployment addresses — see
 [`lib/aqua/config/constants.json`](lib/aqua/config/constants.json) and
 [`lib/swap-vm/config/constants.json`](lib/swap-vm/config/constants.json), both zero-address
 placeholders for local anvil (chain id `31337`). The track's own rules anticipate this directly:
 *"Official Aqua/SwapVM contracts must be used (redeployments of a modified SwapVM contract is
-allowed)"* and *"local forks are ok."* So the demo deploys fresh, unmodified-Aqua +
-modified-SwapVM instances onto a local anvil node and drives them with real signed transactions —
-there is no live deployment to fork against.
+allowed)"* and *"local forks are ok."* There is no live deployment to fork against, so both demo
+scripts deploy fresh, unmodified-Aqua + modified-SwapVM instances themselves — locally on anvil
+for the automated test suite (fast, free, deterministic), and for real on Base Sepolia for the
+actual submission (see [Live on Base Sepolia](#live-on-base-sepolia) above). Uniswap's v4 core
+*is* really deployed on Base Sepolia already, though, so that side of the demo uses Uniswap's own
+`PoolManager` rather than redeploying it too.
 
 ## Run the tests
 
@@ -94,6 +119,27 @@ they're handled rather than glossed over here:
 
 ## Run the on-chain demo
 
+The [Base Sepolia deployment](#live-on-base-sepolia) above is exactly the output of running these
+two scripts for real, in order, against Base Sepolia:
+
+```shell
+forge script script/AqueductDemo.s.sol \
+  --rpc-url <base sepolia rpc> \
+  --private-key <funded base sepolia account> \
+  --broadcast --slow -vvvv
+forge script script/AqueductV4Demo.s.sol \
+  --rpc-url <base sepolia rpc> \
+  --private-key <the same funded account> \
+  --broadcast --slow -vvvv
+```
+
+(`--slow` sends each transaction and waits for it to confirm before sending the next, rather than
+firing them off concurrently — some RPC providers report a transaction's nonce as available slightly
+before it's actually safe to build the next one on top of, and `--slow` avoids that race. Omit it
+against a local anvil node, where it doesn't matter.)
+
+To run the same thing locally instead (no real testnet ETH needed, resets every time):
+
 ```shell
 anvil                                                          # terminal 1
 forge script script/AqueductDemo.s.sol \                       # terminal 2
@@ -106,10 +152,14 @@ forge script script/AqueductV4Demo.s.sol \                     # same terminal, 
   --broadcast -vvvv
 ```
 
-This deploys real contracts and ships real maker liquidity into Aqua as genuine, mined
+Locally, `AqueductV4Demo.s.sol` deploys its own `PoolManager`/`PoolSwapTest` (via `vm.deployCode`,
+since no real v4 deployment exists on anvil); on Base Sepolia it uses Uniswap's real ones instead
+(see above) — the script picks based on `block.chainid`.
+
+Either way, this deploys real contracts and ships real maker liquidity into Aqua as genuine, mined
 transactions (not `forge test` pranks — verifiable independently with `cast receipt` against the
-tx hashes forge writes to `broadcast/*/31337/run-latest.json`), then runs three scenarios as the
-maker's reported exposure climbs:
+tx hashes forge writes to `broadcast/*/<chain id>/run-latest.json`), then runs three scenarios as
+the maker's reported exposure climbs:
 
 1. **10% exposure** (below the 50% max) → normal AMM fill, gate is a no-op
 2. **70% exposure** (between 50% max and 90% halt) → derated fill: same `amountIn`, strictly less
@@ -133,6 +183,13 @@ just read back what the first one deployed instead of re-deriving it — see
 `AqueductV4Demo.s.sol`'s own doc comment for the full reasoning, including a stale-cache issue
 that came up (and was resolved) while wiring this up.
 
+`script/AqueductDemoContinue.s.sol` is a one-off, not part of the normal flow: the Base Sepolia
+run above hit a nonce-tracking mismatch against the RPC provider partway through (after the first
+6 contracts had already deployed successfully), and rather than fight forge's cached broadcast
+state against it, that script just picks up from the 6 already-deployed addresses and finishes
+the rest as a fresh broadcast. Kept as a record of what actually happened, not a general-purpose
+tool — the address constants inside it are specific to this one deployment.
+
 ## The Graph pipeline
 
 `ExposureOracle` needs *something* to feed it a maker's exposure. That something is a subgraph
@@ -152,23 +209,32 @@ that came up (and was resolved) while wiring this up.
 
 Both pieces are complete, real code — the subgraph compiles cleanly to WASM via `graph build`
 (`cd subgraph && npm install && npm run codegen && npx graph build`), and the keeper type-checks
-cleanly (`cd keeper && npm install && npx tsc --noEmit`). What's *not* done, because it requires
-infrastructure this environment doesn't have, is deploying the subgraph to a live indexer (Graph
-Studio or a local `graph-node`) against a real Aqua deployment — there isn't one yet (see above).
-`subgraph/subgraph.yaml` has the placeholder address/network clearly marked for exactly that step.
+cleanly (`cd keeper && npm install && npx tsc --noEmit`). What's *not* done is deploying the
+subgraph to a live indexer (Graph Studio or a local `graph-node`) and running the keeper
+continuously somewhere — genuine off-chain infrastructure, not something this environment stands
+up on its own. There *is* now a real Aqua deployment to index, though (see
+[Live on Base Sepolia](#live-on-base-sepolia)): `subgraph/subgraph.yaml` still has its
+`network`/`address`/`startBlock` fields as placeholders, and this is exactly the piece left for
+whoever picks up the Graph side to fill in with `network: base-sepolia`, the real `Aqua` address
+above, and its actual deployment block, before running `graph deploy`.
 
 ## Frontend
 
-A Next.js dashboard (`frontend/`) drives everything above from a browser instead of the terminal:
+A Next.js dashboard (`frontend/`) drives everything above from a browser instead of the terminal —
+no local setup required, since it reads `frontend/public/deployment.json`, which is committed and
+already points at the real Base Sepolia deployment above:
 
 ```shell
 cd frontend
 npm install
-npm run dev    # after the two forge scripts above have written deployment.json
+npm run dev
 ```
 
-Open `http://localhost:3000` with a wallet (MetaMask or similar) pointed at
-`http://127.0.0.1:8545`, chain id `31337`. It shows:
+Open `http://localhost:3000` with a wallet (MetaMask or similar) switched to Base Sepolia (chain
+id `84532`) — get free testnet ETH from a Base Sepolia faucet first if you don't have any. The
+read-only dashboard data (exposure gauge, keeper panel) uses Base's own public RPC
+(`https://sepolia.base.org`) so it works even before a wallet connects; it never uses a personal
+Alchemy/Infura key client-side, since that file ships to every visitor's browser. It shows:
 
 - **A live exposure gauge** — polls `ExposureOracle.exposureOf(maker)` every few seconds and
   color-codes the maker's current band (safe / derated / halted).
@@ -190,9 +256,10 @@ assumption, to get right:
   22-byte constant regardless of which wallet connects (`0x00000000000000000000000000000000000000000041`,
   in `frontend/lib/constants.ts`) — confirmed by literally calling `TakerTraitsLib.build` with
   those exact args in a throwaway Foundry test and diffing the output, not derived by hand from
-  reading the packing logic alone. A plain anvil account with zero deployed contracts was used to
-  swap directly against `SwapVM` and separately against the v4 pool via `cast send` before any of
-  this was wired into the UI, to confirm both flows work for a bare wallet before relying on them.
+  reading the packing logic alone. A plain wallet with zero deployed contracts was used to swap
+  directly against `SwapVM` and separately against the v4 pool via `cast send` -- on local anvil
+  first, then for real on Base Sepolia -- before either flow was wired into the UI, to confirm
+  both work for a bare wallet before relying on them.
 - **The Uniswap panel reads amountOut from balance deltas, not the call's return value.**
   `PoolSwapTest.swap` returns a `BalanceDelta`, but ethers can only recover a state-changing
   call's return value by replaying it separately from the actual sent transaction — fragile and

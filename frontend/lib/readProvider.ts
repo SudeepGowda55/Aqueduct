@@ -1,13 +1,16 @@
 import { JsonRpcProvider } from "ethers";
 
-// A read-only fallback so dashboard data (exposure, balances) can render before a wallet is
-// connected, or for viewers who don't have MetaMask at all. Local anvil only, by design -- this
-// whole app is a local demo frontend, not a production dApp meant to work against arbitrary RPCs.
+// Base's own public Sepolia RPC -- deliberately not a personal Alchemy/Infura URL. This file
+// ships to every visitor's browser as plain client-side JS, so anything hardcoded here is public;
+// a keyed RPC endpoint would leak that key to anyone who opens devtools. Deployment scripts (run
+// locally, never shipped to a browser) can safely use a keyed endpoint instead.
+const BASE_SEPOLIA_PUBLIC_RPC = "https://sepolia.base.org";
+
 let cached: JsonRpcProvider | null = null;
 
 export function getReadProvider(): JsonRpcProvider {
   if (!cached) {
-    cached = new JsonRpcProvider("http://127.0.0.1:8545");
+    cached = new JsonRpcProvider(BASE_SEPOLIA_PUBLIC_RPC);
   }
   return cached;
 }

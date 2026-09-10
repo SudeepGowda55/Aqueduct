@@ -44,7 +44,7 @@ export function ConnectWallet() {
       </div>
       {isWrongNetwork && (
         <p className="max-w-xs text-right text-xs text-amber-400">
-          Point your wallet at http://127.0.0.1:8545 (chain id 31337) to use this app.
+          Switch your wallet to Base Sepolia (chain id 84532) to use this app.
         </p>
       )}
     </div>
