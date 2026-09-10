@@ -1,0 +1,39 @@
+specVersion: 0.0.9
+description: >-
+  Aqueduct exposure subgraph: aggregates a maker's committed balances across every Aqua strategy
+  they've shipped, so a keeper can compute a live cross-protocol exposure ratio and post it to
+  ExposureOracle for the ExposureGate SwapVM opcode to read.
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: Aqua
+    network: mainnet # replace with the network Aqua is actually deployed on
+    source:
+      # 1inch's own repos ship no real Aqua deployment address (see lib/aqua/config/constants.json
+      # -- a zero-address placeholder for local anvil). Fill this in once Aqua is deployed to a
+      # real network, or point it at your own local deployment for testing.
+      address: "0x0000000000000000000000000000000000000000"
+      abi: Aqua
+      startBlock: 0 # replace with Aqua's actual deployment block to avoid a full historical sync
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - StrategyBalance
+        - MakerTokenExposure
+        - AquaBalanceEvent
+      abis:
+        - name: Aqua
+          file: ./abis/Aqua.json
+      eventHandlers:
+        - event: Shipped(address,address,bytes32,bytes)
+          handler: handleShipped
+        - event: Pushed(address,address,bytes32,address,uint256)
+          handler: handlePushed
+        - event: Pulled(address,address,bytes32,address,uint256)
+          handler: handlePulled
+        - event: Docked(address,address,bytes32)
+          handler: handleDocked
+      file: ./src/mapping.ts

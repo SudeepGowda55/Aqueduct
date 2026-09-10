@@ -1,0 +1,17 @@
+{
+  "name": "aqueduct-subgraph",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Indexes Aqua's Shipped/Pushed/Pulled/Docked events into per-maker, per-token committed balances, so a keeper can compute cross-protocol exposure for ExposureOracle.",
+  "scripts": {
+    "codegen": "graph codegen",
+    "build": "graph build",
+    "deploy": "graph deploy --node https://api.studio.thegraph.com/deploy/ aqueduct-exposure",
+    "create-local": "graph create --node http://localhost:8020/ aqueduct-exposure",
+    "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 aqueduct-exposure"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "^0.97.1",
+    "@graphprotocol/graph-ts": "^0.38.1"
+  }
+}

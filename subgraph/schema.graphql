@@ -1,0 +1,48 @@
+# One Aqua strategy: a (maker, app, strategyHash) triple, tracking which tokens it holds so
+# `handleDocked` can flip every one of them inactive even though the `Docked` event itself
+# doesn't list tokens (`Aqua.dock` requires the caller to pass the full token list, but doesn't
+# re-emit it).
+type Strategy @entity(immutable: false) {
+  id: ID! # `${maker.toHex()}-${app.toHex()}-${strategyHash.toHex()}`
+  maker: Bytes!
+  app: Bytes!
+  strategyHash: Bytes!
+  tokens: [Bytes!]!
+  active: Boolean!
+  shippedAtBlock: BigInt!
+  shippedAtTimestamp: BigInt!
+}
+
+# One maker's currently-committed balance of one token, in one Aqua strategy. Mirrors Aqua's own
+# (maker, app, strategyHash, token) balance key exactly, so this entity's `amount` always matches
+# what `Aqua.rawBalances(maker, app, strategyHash, token)` would return on-chain at the same block.
+#
+# A keeper computes a maker's total exposure by querying every active StrategyBalance for that
+# maker (across every app/strategy they've shipped to -- exactly the "multiplier effect" Aqua
+# enables), summing per token, and comparing that sum against a live on-chain wallet-balance read
+# before pushing the resulting ratio to ExposureOracle.
+type StrategyBalance @entity(immutable: false) {
+  id: ID! # `${maker.toHex()}-${app.toHex()}-${strategyHash.toHex()}-${token.toHex()}`
+  maker: Bytes!
+  app: Bytes!
+  strategyHash: Bytes!
+  token: Bytes!
+  amount: BigInt!
+  active: Boolean!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+# Raw event log, kept for auditability / debugging the keeper's inputs.
+type AquaBalanceEvent @entity(immutable: true) {
+  id: ID! # `${tx.hash.toHex()}-${logIndex}`
+  kind: String! # "Shipped" | "Pushed" | "Pulled" | "Docked"
+  maker: Bytes!
+  app: Bytes!
+  strategyHash: Bytes!
+  token: Bytes # null for Docked, which has no per-token amount
+  amount: BigInt # null for Docked
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
