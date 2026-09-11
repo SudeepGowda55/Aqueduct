@@ -12,6 +12,7 @@ import { ISwapVM } from "@1inch/swap-vm/src/interfaces/ISwapVM.sol";
 import { TakerTraitsLib } from "@1inch/swap-vm/src/libs/TakerTraits.sol";
 import { MakerTraitsLib } from "@1inch/swap-vm/src/libs/MakerTraits.sol";
 import { XYCSwap } from "@1inch/swap-vm/src/instructions/XYCSwap.sol";
+import { Controls } from "@1inch/swap-vm/src/instructions/Controls.sol";
 
 import { Program, ProgramBuilder } from "@1inch/swap-vm/test/utils/ProgramBuilder.sol";
 import { dynamic } from "@1inch/swap-vm/test/utils/Dynamic.sol";
@@ -82,6 +83,28 @@ contract ExposureGateTest is Test, ExposureAquaOpcodes {
                 ExposureGateArgsBuilder.build(address(oracle), maxBps, haltBps, maxStaleness)
             )
         );
+    }
+
+    /// @dev Salted variant so a single test function can ship several otherwise-identical gated
+    /// strategies (each with its own fresh, undepleted pool) without their `strategyHash`es
+    /// colliding -- `Controls._salt` is a verified pure no-op, so this changes nothing about the
+    /// program's actual behavior.
+    function gatedProgram(uint16 maxBps, uint16 haltBps, uint16 maxStaleness, bytes1 salt) internal view returns (bytes memory) {
+        Program memory p = ProgramBuilder.init(_opcodes());
+        return bytes.concat(
+            p.build(XYCSwap._xycSwapXD),
+            p.build(
+                ExposureGate._exposureGate1D,
+                ExposureGateArgsBuilder.build(address(oracle), maxBps, haltBps, maxStaleness)
+            ),
+            p.build(Controls._salt, abi.encodePacked(salt))
+        );
+    }
+
+    /// @dev Salted variant of `baselineProgram`, for the same reason as above.
+    function baselineProgram(bytes1 salt) internal view returns (bytes memory) {
+        Program memory p = ProgramBuilder.init(_opcodes());
+        return bytes.concat(p.build(XYCSwap._xycSwapXD), p.build(Controls._salt, abi.encodePacked(salt)));
     }
 
     // ===== order / strategy / swap helpers (mirrors 1inch's own AquaAccounting.t.sol) =====
@@ -243,6 +266,168 @@ contract ExposureGateTest is Test, ExposureAquaOpcodes {
             abi.encodeWithSelector(ExposureGate.ExposureGateOracleStale.selector, block.timestamp, updatedAt, maxStaleness)
         );
         performSwap(gated, 100e18, true);
+    }
+
+    // ===== named boundary-value tests =====
+    //
+    // The fuzz tests below cover the full input space as a property, but boundary values are
+    // exactly where off-by-one errors hide, so each edge of the three bands (<=max / between /
+    // >=halt) gets its own explicit, readable test rather than relying on the fuzzer to happen to
+    // land on them.
+
+    function test_PassThrough_AtZeroExposure() public {
+        ISwapVM.Order memory gated = createOrder(gatedProgram(MAX_BPS, HALT_BPS, NO_STALENESS_CHECK));
+        ISwapVM.Order memory baseline = createOrder(baselineProgram());
+        shipStrategy(gated);
+        shipStrategy(baseline);
+
+        oracle.pushExposure(maker, 0);
+
+        (, uint256 baselineOut) = performSwap(baseline, 100e18, true);
+        (, uint256 gatedOut) = performSwap(gated, 100e18, true);
+
+        assertEq(gatedOut, baselineOut, "zero exposure must be a pure no-op");
+    }
+
+    function test_PassThrough_AtExactlyMaxThreshold() public {
+        // exposureBps == maxExposureBps is specified as still within the no-op band ("at/below
+        // this: no adjustment") -- this is the sharp edge of that band, not "well below" it.
+        ISwapVM.Order memory gated = createOrder(gatedProgram(MAX_BPS, HALT_BPS, NO_STALENESS_CHECK));
+        ISwapVM.Order memory baseline = createOrder(baselineProgram());
+        shipStrategy(gated);
+        shipStrategy(baseline);
+
+        oracle.pushExposure(maker, MAX_BPS);
+
+        (, uint256 baselineOut) = performSwap(baseline, 100e18, true);
+        (, uint256 gatedOut) = performSwap(gated, 100e18, true);
+
+        assertEq(gatedOut, baselineOut, "exposure exactly at maxExposureBps must still be untouched");
+    }
+
+    function test_Derate_JustAboveMaxThreshold() public {
+        // maxExposureBps + 1 is the sharp edge of the OTHER side of that same boundary -- the
+        // smallest possible derate, one bps into the band.
+        ISwapVM.Order memory gated = createOrder(gatedProgram(MAX_BPS, HALT_BPS, NO_STALENESS_CHECK));
+        ISwapVM.Order memory baseline = createOrder(baselineProgram());
+        shipStrategy(gated);
+        shipStrategy(baseline);
+
+        oracle.pushExposure(maker, MAX_BPS + 1);
+
+        (, uint256 baselineOut) = performSwap(baseline, 100e18, true);
+        (, uint256 gatedOut) = performSwap(gated, 100e18, true);
+
+        assertLt(gatedOut, baselineOut, "even one bps into the band must strictly derate");
+    }
+
+    function test_Derate_JustBelowHaltThreshold() public {
+        // haltExposureBps - 1 is the sharp edge just before the hard revert -- the largest
+        // possible derate that still fills at all, rather than reverting.
+        ISwapVM.Order memory gated = createOrder(gatedProgram(MAX_BPS, HALT_BPS, NO_STALENESS_CHECK));
+        ISwapVM.Order memory baseline = createOrder(baselineProgram());
+        shipStrategy(gated);
+        shipStrategy(baseline);
+
+        oracle.pushExposure(maker, HALT_BPS - 1);
+
+        (, uint256 baselineOut) = performSwap(baseline, 100e18, true);
+        (, uint256 gatedOut) = performSwap(gated, 100e18, true);
+
+        assertGt(gatedOut, 0, "one bps before halt must still produce a (heavily derated) fill");
+        assertLt(gatedOut, baselineOut, "must still be strictly worse than the ungated baseline");
+    }
+
+    function test_Derate_WithTinyAmount() public {
+        ISwapVM.Order memory gated = createOrder(gatedProgram(MAX_BPS, HALT_BPS, NO_STALENESS_CHECK));
+        ISwapVM.Order memory baseline = createOrder(baselineProgram());
+        shipStrategy(gated);
+        shipStrategy(baseline);
+
+        oracle.pushExposure(maker, 7_000);
+
+        (, uint256 baselineOut) = performSwap(baseline, 1e6, true);
+        (, uint256 gatedOut) = performSwap(gated, 1e6, true);
+
+        assertLe(gatedOut, baselineOut, "derate must hold even at dust-sized swap amounts");
+    }
+
+    function test_Derate_WithHugeAmount() public {
+        ISwapVM.Order memory gated = createOrder(gatedProgram(MAX_BPS, HALT_BPS, NO_STALENESS_CHECK));
+        ISwapVM.Order memory baseline = createOrder(baselineProgram());
+        shipStrategy(gated);
+        shipStrategy(baseline);
+
+        oracle.pushExposure(maker, 7_000);
+
+        // 900e18 against a 1_000e18-deep pool -- as large a swap as this maker's liquidity can
+        // support, deliberately chosen to stress the derate math against near-maximal price impact.
+        (, uint256 baselineOut) = performSwap(baseline, 900e18, true);
+        (, uint256 gatedOut) = performSwap(gated, 900e18, true);
+
+        assertLt(gatedOut, baselineOut, "derate must hold even at near-maximal swap amounts");
+    }
+
+    /// @notice Narrative walk-through of the exact claim in `ExposureGate.sol`'s contract-level
+    /// comment: no matter what an oracle reports -- accurate, exaggerated, or an outright lie up
+    /// to the maximum value `ExposureOracle` will even accept -- the fill for a FIXED swap amount
+    /// against a FRESH, identically-sized pool never goes up as the reported exposure goes up, and
+    /// past the halt threshold it stops filling at all rather than ever reversing direction. The
+    /// final step shows staleness is enforced independently of the exposure value itself: a
+    /// reading that would otherwise be perfectly safe (0%) is still rejected once it's too old to
+    /// trust, rather than being assumed safe by default.
+    function test_MaliciousOracle_CanOnlyEverMakeFillMoreConservative() public {
+        uint16 maxStaleness = 60;
+        uint256 amount = 1e18;
+
+        // Step 1: 0% exposure -- the gate is a strict no-op, fill matches the ungated baseline.
+        ISwapVM.Order memory gated0 = createOrder(gatedProgram(MAX_BPS, HALT_BPS, maxStaleness, hex"00"));
+        ISwapVM.Order memory baseline0 = createOrder(baselineProgram(hex"01"));
+        shipStrategy(gated0);
+        shipStrategy(baseline0);
+        oracle.pushExposure(maker, 0);
+        (, uint256 baselineOut) = performSwap(baseline0, amount, true);
+        (, uint256 outAt0) = performSwap(gated0, amount, true);
+        assertEq(outAt0, baselineOut, "0%: untouched, matches the ungated baseline exactly");
+
+        // Step 2: 70% exposure -- inside the derate band, strictly worse than the baseline, and
+        // no better than step 1 (a "worse-looking" reading can only pull the fill down further).
+        ISwapVM.Order memory gated70 = createOrder(gatedProgram(MAX_BPS, HALT_BPS, maxStaleness, hex"02"));
+        shipStrategy(gated70);
+        oracle.pushExposure(maker, 7_000);
+        (, uint256 outAt70) = performSwap(gated70, amount, true);
+        assertLt(outAt70, outAt0, "70%: must be strictly worse than the 0% fill");
+        assertLt(outAt70, baselineOut, "70%: must be strictly worse than the ungated baseline");
+
+        // Step 3: 90% exposure (the halt threshold) -- no fill at all, not even a very bad one.
+        ISwapVM.Order memory gated90 = createOrder(gatedProgram(MAX_BPS, HALT_BPS, maxStaleness, hex"03"));
+        shipStrategy(gated90);
+        oracle.pushExposure(maker, HALT_BPS);
+        vm.expectRevert(haltError(HALT_BPS));
+        performSwap(gated90, amount, true);
+
+        // Step 4: 10_000 bps (100%) -- the maximum value ExposureOracle will even accept (a
+        // "malicious" keeper cannot report anything worse than this on-chain). Still just a
+        // revert, never a fill, let alone a favorable one -- confirming there is no value the
+        // oracle can report, however extreme, that ever lets the taker do better than step 1.
+        ISwapVM.Order memory gatedMax = createOrder(gatedProgram(MAX_BPS, HALT_BPS, maxStaleness, hex"04"));
+        shipStrategy(gatedMax);
+        oracle.pushExposure(maker, 10_000);
+        vm.expectRevert(haltError(10_000));
+        performSwap(gatedMax, amount, true);
+
+        // Step 5: a reading that would, on its face, be perfectly safe (0%) is still rejected once
+        // stale -- an absent or frozen oracle fails closed (no fill) rather than defaulting to
+        // "assume safe."
+        ISwapVM.Order memory gatedStale = createOrder(gatedProgram(MAX_BPS, HALT_BPS, maxStaleness, hex"05"));
+        shipStrategy(gatedStale);
+        oracle.pushExposure(maker, 0);
+        (, uint256 updatedAt) = oracle.exposureOf(maker);
+        vm.warp(block.timestamp + maxStaleness + 1);
+        vm.expectRevert(
+            abi.encodeWithSelector(ExposureGate.ExposureGateOracleStale.selector, block.timestamp, updatedAt, maxStaleness)
+        );
+        performSwap(gatedStale, amount, true);
     }
 
     // ===== property test: the load-bearing claim =====

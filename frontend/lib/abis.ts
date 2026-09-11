@@ -11,6 +11,10 @@ export const EXPOSURE_ORACLE_ABI = [
   "function pushExposure(address maker, uint64 exposureBps)",
   "function keeper() view returns (address)",
   "function owner() view returns (address)",
+  // Maker-only emergency kill switch (see src/oracle/ExposureOracle.sol) -- reverts against any
+  // deployment predating this function, which EmergencyPausePanel handles explicitly.
+  "function isPausedByMaker(address maker) view returns (bool)",
+  "function setPausedByMaker(bool paused)",
 ];
 
 // Only the pieces the frontend calls directly. `swap`'s Order tuple must match

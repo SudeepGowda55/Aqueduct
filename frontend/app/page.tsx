@@ -1,10 +1,14 @@
 "use client";
 
 import { ActivityLogPanel } from "@/components/ActivityLogPanel";
+import { BaselineComparisonPanel } from "@/components/BaselineComparisonPanel";
 import { ConnectWallet } from "@/components/ConnectWallet";
+import { CrossVenueProofPanel } from "@/components/CrossVenueProofPanel";
 import { DeploymentAddresses, DeploymentStatus } from "@/components/DeploymentStatus";
+import { EmergencyPausePanel } from "@/components/EmergencyPausePanel";
 import { ExposureGauge } from "@/components/ExposureGauge";
 import { KeeperPanel } from "@/components/KeeperPanel";
+import { RiskPolicyPanel } from "@/components/RiskPolicyPanel";
 import { SwapVMPanel } from "@/components/SwapVMPanel";
 import { UniswapPanel } from "@/components/UniswapPanel";
 import { ActivityLogProvider } from "@/lib/ActivityLogProvider";
@@ -38,9 +42,18 @@ export default function Home() {
                 </div>
               </section>
 
+              <CrossVenueProofPanel />
+
               <div className="grid gap-6 md:grid-cols-2">
                 <SwapVMPanel />
                 <UniswapPanel />
+              </div>
+
+              <BaselineComparisonPanel />
+
+              <div className="grid gap-6 md:grid-cols-2">
+                <RiskPolicyPanel />
+                <EmergencyPausePanel />
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">

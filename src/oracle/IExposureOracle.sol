@@ -12,4 +12,10 @@ interface IExposureOracle {
     /// @return exposureBps Exposure in basis points (10_000 = 100%)
     /// @return updatedAt Unix timestamp of the last update, for staleness checks
     function exposureOf(address maker) external view returns (uint64 exposureBps, uint256 updatedAt);
+
+    /// @notice Whether `maker` has flipped their own emergency kill switch on this oracle
+    /// @dev Settable only by `maker` themselves (see `ExposureOracle.setPausedByMaker`), never by
+    ///      the keeper -- this is the maker's own escape hatch if they distrust the exposure feed
+    ///      right now, independent of whatever the keeper is (or isn't) reporting.
+    function isPausedByMaker(address maker) external view returns (bool);
 }

@@ -23,12 +23,15 @@ export const EXPOSURE_BANDS = {
   haltLabel: "Halted",
 } as const;
 
+// Mirrors ExposureGate.sol's own boundary semantics exactly (`exposureBps <= maxExposureBps` is
+// the no-op/safe band, not `<`) -- getting this off by one would make the UI disagree with the
+// contract at the exact threshold value.
 export function exposureBand(
   exposureBps: number,
   maxExposureBps: number,
   haltExposureBps: number
 ): "safe" | "derate" | "halt" {
   if (exposureBps >= haltExposureBps) return "halt";
-  if (exposureBps >= maxExposureBps) return "derate";
+  if (exposureBps > maxExposureBps) return "derate";
   return "safe";
 }

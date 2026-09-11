@@ -24,6 +24,8 @@ contract ExposureOracle is IExposureOracle, Ownable {
     event ExposureUpdated(address indexed maker, uint64 exposureBps, uint256 updatedAt);
     /// @notice Emitted when the keeper address is changed
     event KeeperUpdated(address indexed previousKeeper, address indexed newKeeper);
+    /// @notice Emitted when a maker flips their own emergency kill switch
+    event MakerPauseUpdated(address indexed maker, bool paused);
 
     struct Reading {
         uint64 exposureBps;
@@ -34,6 +36,8 @@ contract ExposureOracle is IExposureOracle, Ownable {
     address public keeper;
 
     mapping(address maker => Reading) private _readings;
+    /// @dev Maker-controlled, not keeper-controlled -- see `setPausedByMaker`.
+    mapping(address maker => bool) private _pausedByMaker;
 
     modifier onlyKeeper() {
         require(msg.sender == keeper, NotKeeper(msg.sender));
@@ -65,5 +69,21 @@ contract ExposureOracle is IExposureOracle, Ownable {
     function exposureOf(address maker) external view returns (uint64 exposureBps, uint256 updatedAt) {
         Reading storage r = _readings[maker];
         return (r.exposureBps, r.updatedAt);
+    }
+
+    /// @notice The maker's own emergency kill switch: if they distrust the exposure feed right
+    ///         now (e.g. a suspected keeper compromise or a Graph pipeline outage reporting stale
+    ///         garbage) they can halt every one of their own exposure-gated strategies themselves,
+    ///         without needing the keeper's, this contract's owner's, or anyone else's cooperation.
+    /// @dev Deliberately msg.sender-scoped -- there is no "pause someone else" path, by
+    ///      construction, not by convention.
+    function setPausedByMaker(bool paused) external {
+        _pausedByMaker[msg.sender] = paused;
+        emit MakerPauseUpdated(msg.sender, paused);
+    }
+
+    /// @inheritdoc IExposureOracle
+    function isPausedByMaker(address maker) external view returns (bool) {
+        return _pausedByMaker[maker];
     }
 }

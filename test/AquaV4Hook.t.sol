@@ -207,6 +207,102 @@ contract AquaV4HookTest is Test, ExposureAquaOpcodes {
         _swap(true, SWAP_AMOUNT);
     }
 
+    /// @notice Closes the one gap identified in review: `test_Reverts_WhenOracleReadingStale` in
+    /// ExposureGate.t.sol only ever exercises the direct SwapVM path. This proves the SAME
+    /// staleness check fails closed through the v4 path too, wrapped in `PoolManager`'s own
+    /// `Hooks.sol` revert-bubbling exactly like the halt test above -- a stale reading is not a
+    /// direct-path-only protection.
+    function test_Reverts_WhenOracleReadingStale_V4Path() public {
+        uint16 maxStaleness = 60;
+
+        // A fresh, isolated hook + pool + strategy with staleness enabled -- setUp()'s shared
+        // hook/order use maxStaleness = 0 (no check), so this needs its own wiring rather than
+        // reusing them, the same way ExposureGate.t.sol's own stale test uses a dedicated program
+        // rather than mutating the shared one every other test in that file depends on.
+        Program memory p = ProgramBuilder.init(_opcodes());
+        bytes memory program = bytes.concat(
+            p.build(XYCSwap._xycSwapXD),
+            p.build(
+                ExposureGate._exposureGate1D,
+                ExposureGateArgsBuilder.build(address(oracle), MAX_BPS, HALT_BPS, maxStaleness)
+            )
+        );
+        ISwapVM.Order memory staleOrder = MakerTraitsLib.build(MakerTraitsLib.Args({
+            maker: maker,
+            shouldUnwrapWeth: false,
+            useAquaInsteadOfSignature: true,
+            allowZeroAmountIn: false,
+            receiver: address(0),
+            hasPreTransferInHook: false,
+            hasPostTransferInHook: false,
+            hasPreTransferOutHook: false,
+            hasPostTransferOutHook: false,
+            preTransferInTarget: address(0),
+            preTransferInData: "",
+            postTransferInTarget: address(0),
+            postTransferInData: "",
+            preTransferOutTarget: address(0),
+            preTransferOutData: "",
+            postTransferOutTarget: address(0),
+            postTransferOutData: "",
+            program: program
+        }));
+
+        uint160 flags = uint160(
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+                | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
+        );
+        bytes memory constructorArgs = abi.encode(poolManager, aqua, swapVM, staleOrder);
+        (address hookAddress, bytes32 salt) =
+            HookMiner.find(address(this), flags, type(AquaV4Hook).creationCode, constructorArgs);
+        AquaV4Hook staleHook = new AquaV4Hook{ salt: salt }(poolManager, aqua, swapVM, staleOrder);
+        assertEq(address(staleHook), hookAddress, "hook address mismatch");
+
+        PoolKey memory stalePoolKey = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: 0,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(staleHook))
+        });
+        poolManager.initialize(stalePoolKey, TickMath.getSqrtPriceAtTick(0));
+        token0.mint(address(staleHook), 1_000e18);
+        token1.mint(address(staleHook), 1_000e18);
+
+        bytes32 orderHash = swapVM.hash(staleOrder);
+        token0.mint(maker, INITIAL_BALANCE);
+        token1.mint(maker, INITIAL_BALANCE);
+        vm.startPrank(maker);
+        token0.approve(address(aqua), type(uint256).max);
+        token1.approve(address(aqua), type(uint256).max);
+        bytes32 strategyHash = aqua.ship(
+            address(swapVM), abi.encode(staleOrder), dynamic([address(token0), address(token1)]),
+            dynamic([INITIAL_BALANCE, INITIAL_BALANCE])
+        );
+        vm.stopPrank();
+        assertEq(strategyHash, orderHash, "strategy hash mismatch");
+
+        oracle.pushExposure(maker, 0); // perfectly safe reading -- would fill fine if not stale
+        (, uint256 updatedAt) = oracle.exposureOf(maker);
+        vm.warp(block.timestamp + maxStaleness + 1);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(staleHook),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(ExposureGate.ExposureGateOracleStale.selector, block.timestamp, updatedAt, maxStaleness),
+                hex"a9e35b2f"
+            )
+        );
+        swapRouter.swap(
+            stalePoolKey,
+            SwapParams({ zeroForOne: true, amountSpecified: -int256(SWAP_AMOUNT), sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1 }),
+            PoolSwapTest.TestSettings({ takeClaims: false, settleUsingBurn: false }),
+            ""
+        );
+    }
+
     function test_ExactOutputReverts() public {
         vm.expectRevert(
             _wrappedRevert(IHooks.beforeSwap.selector, abi.encodeWithSelector(AquaV4Hook.ExactOutputNotSupported.selector))
