@@ -6,7 +6,7 @@
   "scripts": {
     "codegen": "graph codegen",
     "build": "graph build",
-    "deploy": "graph deploy --node https://api.studio.thegraph.com/deploy/ aqueduct-exposure",
+    "deploy": "graph deploy --node https://api.studio.thegraph.com/deploy/ ethonline",
     "create-local": "graph create --node http://localhost:8020/ aqueduct-exposure",
     "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 aqueduct-exposure"
   },

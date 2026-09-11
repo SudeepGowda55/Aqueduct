@@ -454,10 +454,9 @@ cleanly (`cd keeper && npm install && npx tsc --noEmit`). What's *not* done is d
 subgraph to a live indexer (Graph Studio or a local `graph-node`) and running the keeper
 continuously somewhere — genuine off-chain infrastructure, not something this environment stands
 up on its own. There *is* now a real Aqua deployment to index, though (see
-[Live on Base Sepolia](#live-on-base-sepolia)): `subgraph/subgraph.yaml` still has its
-`network`/`address`/`startBlock` fields as placeholders, and this is exactly the piece left for
-whoever picks up the Graph side to fill in with `network: base-sepolia`, the real `Aqua` address
-above, and its actual deployment block, before running `graph deploy`.
+[Live on Base Sepolia](#live-on-base-sepolia)): `subgraph/subgraph.yaml` is already filled in
+with `network: base-sepolia`, the real `Aqua` address above, and its actual deployment block,
+so the remaining step is running `graph deploy` (see `subgraph/package.json`).
 
 ## Frontend
 
