@@ -55,7 +55,13 @@ frontend.
 | `Aqua` | [`0x2e706D0c3a6d9C8d62Bb3276Ff9a1a04e9108461`](https://sepolia.basescan.org/address/0x2e706D0c3a6d9C8d62Bb3276Ff9a1a04e9108461) |
 | `ExposureOracle` | [`0xE68530d8e694eC6d237F0B07eC24C405c8Cd764A`](https://sepolia.basescan.org/address/0xE68530d8e694eC6d237F0B07eC24C405c8Cd764A) |
 | `ExposureAwareAquaRouter` (SwapVM) | [`0xC008DD3D1293543d5FA7AD6eED285eD45E3d7cCc`](https://sepolia.basescan.org/address/0xC008DD3D1293543d5FA7AD6eED285eD45E3d7cCc) |
-| `AquaV4Hook` | [`0xE115c49376c960B29D0bD77bF8C226a9562EAa88`](https://sepolia.basescan.org/address/0xE115c49376c960B29D0bD77bF8C226a9562EAa88) |
+| `AquaV4Hook` (Strategy A pool) | [`0xE115c49376c960B29D0bD77bF8C226a9562EAa88`](https://sepolia.basescan.org/address/0xE115c49376c960B29D0bD77bF8C226a9562EAa88) |
+| `AquaV4Hook` (Strategy F pool) | [`0x7aec9fb4edc2aff6c016cbb807e4f466d5c82a88`](https://sepolia.basescan.org/address/0x7aec9fb4edc2aff6c016cbb807e4f466d5c82a88) |
+
+Live off-chain links: dashboard [`aqueduct-protocol.vercel.app`](https://aqueduct-protocol.vercel.app/) ·
+subgraph on [Subgraph Studio (`ethonline`, v0.2.0)](https://thegraph.com/studio/subgraph/ethonline) ·
+[query endpoint](https://api.studio.thegraph.com/query/1758739/ethonline/v0.2.0) ·
+keeper push [`0x19550d…9cac`](https://sepolia.basescan.org/tx/0x19550d3f6e2162f901f39eab8d00657aab6eae6e0ce5111907898625441b9cac) (10000 bps, mined block 46688226).
 
 The v4 side deliberately does **not** deploy its own `PoolManager` or swap router — it uses
 Uniswap's own real Base Sepolia deployment ([`PoolManager` at `0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408`](https://sepolia.basescan.org/address/0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408),
@@ -453,9 +459,9 @@ immediately undoing it, so the live strategy was never left stuck halted for the
 Both pieces are complete, real code — the subgraph compiles cleanly to WASM via `graph build`
 (`cd subgraph && npm install && npm run codegen && npx graph build`), and the keeper type-checks
 cleanly (`cd keeper && npm install && npx tsc --noEmit`). Both are also **live**: the subgraph is
-deployed to Subgraph Studio as `ethonline` (v0.2.0, Base Sepolia — query it in the Studio
+deployed to [Subgraph Studio as `ethonline`](https://thegraph.com/studio/subgraph/ethonline) (v0.2.0, Base Sepolia — query it in the Studio
 Playground or at `https://api.studio.thegraph.com/query/1758739/ethonline/v0.2.0`), and the keeper
-has run for real against it (pushed exposure for maker `0x5067…`, tx mined on Base Sepolia;
+has run for real against it (pushed exposure for maker `0x5067…`, [tx mined on Base Sepolia](https://sepolia.basescan.org/tx/0x19550d3f6e2162f901f39eab8d00657aab6eae6e0ce5111907898625441b9cac);
 re-run any time with `SUBGRAPH_URL=… RPC_URL=… ORACLE_ADDRESS=… KEEPER_PRIVATE_KEY=… npm start`
 from `keeper/`).
 
