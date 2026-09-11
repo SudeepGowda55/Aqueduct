@@ -28,9 +28,16 @@ dataSources:
         - Strategy
         - StrategyBalance
         - AquaBalanceEvent
+        - Maker
+        - ExposurePosition
+        - ExposureSnapshot
       abis:
         - name: Aqua
           file: ./abis/Aqua.json
+        - name: ExposureOracle
+          file: ./abis/ExposureOracle.json
+        - name: ERC20
+          file: ./abis/ERC20.json
       eventHandlers:
         - event: Shipped(address,address,bytes32,bytes)
           handler: handleShipped
@@ -40,4 +47,54 @@ dataSources:
           handler: handlePulled
         - event: Docked(address,address,bytes32)
           handler: handleDocked
+      file: ./src/mapping.ts
+  - kind: ethereum
+    name: ExposureOracle
+    network: base-sepolia
+    source:
+      # Live ExposureOracle (see frontend/public/deployment.json) -- same
+      # startBlock as Aqua (oracle was redeployed after, so nothing is missed).
+      address: "0xE68530d8e694eC6d237F0B07eC24C405c8Cd764A"
+      abi: ExposureOracle
+      startBlock: 46640685
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Maker
+        - ExposurePosition
+        - ExposureSnapshot
+      abis:
+        - name: ExposureOracle
+          file: ./abis/ExposureOracle.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: ExposureUpdated(indexed address,uint64,uint256)
+          handler: handleExposureUpdated
+        - event: MakerPauseUpdated(indexed address,bool)
+          handler: handleMakerPauseUpdated
+      file: ./src/mapping.ts
+  - kind: ethereum
+    name: PoolManager
+    network: base-sepolia
+    source:
+      # Uniswap v4 PoolManager on Base Sepolia. Only two pools matter (see
+      # POOL_TO_STRATEGY in mapping.ts); the handler ignores everything else.
+      address: "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408"
+      abi: PoolManager
+      startBlock: 46640685
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - ExposurePosition
+      abis:
+        - name: PoolManager
+          file: ./abis/PoolManager.json
+      eventHandlers:
+        - event: Swap(indexed bytes32,indexed address,int128,int128,uint160,uint128,int24,uint24)
+          handler: handlePoolSwap
       file: ./src/mapping.ts

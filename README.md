@@ -452,13 +452,75 @@ immediately undoing it, so the live strategy was never left stuck halted for the
 
 Both pieces are complete, real code — the subgraph compiles cleanly to WASM via `graph build`
 (`cd subgraph && npm install && npm run codegen && npx graph build`), and the keeper type-checks
-cleanly (`cd keeper && npm install && npx tsc --noEmit`). What's *not* done is deploying the
-subgraph to a live indexer (Graph Studio or a local `graph-node`) and running the keeper
-continuously somewhere — genuine off-chain infrastructure, not something this environment stands
-up on its own. There *is* now a real Aqua deployment to index, though (see
-[Live on Base Sepolia](#live-on-base-sepolia)): `subgraph/subgraph.yaml` is already filled in
-with `network: base-sepolia`, the real `Aqua` address above, and its actual deployment block,
-so the remaining step is running `graph deploy` (see `subgraph/package.json`).
+cleanly (`cd keeper && npm install && npx tsc --noEmit`). Both are also **live**: the subgraph is
+deployed to Subgraph Studio as `ethonline` (v0.2.0, Base Sepolia — query it in the Studio
+Playground or at `https://api.studio.thegraph.com/query/1758739/ethonline/v0.2.0`), and the keeper
+has run for real against it (pushed exposure for maker `0x5067…`, tx mined on Base Sepolia;
+re-run any time with `SUBGRAPH_URL=… RPC_URL=… ORACLE_ADDRESS=… KEEPER_PRIVATE_KEY=… npm start`
+from `keeper/`).
+
+### ExposurePosition: one entity joining two contracts plus v4 swaps
+
+On top of the balance bookkeeping above, the subgraph maintains **one `ExposurePosition` per
+(maker, strategyHash)**, joined from three event sources:
+
+- **Aqua** (`Shipped`/`Pushed`/`Pulled`/`Docked`) → `committedAmount` (re-summed across apps from
+  live `StrategyBalance` rows) and `makerWalletBalance` via a live `balanceOf()` eth-call on every
+  touch — wallet balance is not an event, so it is read, not indexed.
+- **ExposureOracle** (`ExposureUpdated`/`MakerPauseUpdated`) → `exposureBps`, `isPausedByMaker`,
+  and derived `status` (`SAFE` / `DERATED` / `HALTED` / `PAUSED` against hardcoded 50% / 90%
+  thresholds — every live strategy uses them, so no program-byte decoding). Maker-level events fan
+  out to every position via an internal `Maker.positionIds` index, and each fan-out writes an
+  immutable **`ExposureSnapshot`** — exposure-over-time (10% → 40% → 70% → 90%) is one ordered query.
+- **Uniswap v4 PoolManager** (`Swap`) → confirms the `uniswap-v4` venue. The two hook-bound pools
+  are hardcoded as poolId → strategy (`0xeadf…` → Strategy A, `0xafc0…` → Strategy F — the latter
+  proven by correlating a pool-2 swap with the `Pulled` event in the same transaction); all other
+  pools are ignored. No factory/discovery events exist, so this mapping is intentionally manual.
+
+The killer query — one `exposurePositions(where: {maker: ...})` returning the SwapVM *and* Uniswap
+v4 view of the same position, with `venues: ["swapvm", "uniswap-v4"]` on Strategies A and F:
+
+```graphql
+{
+  exposurePositions(where: { maker: "0x5067591c365d7d69d76b725c2d9af7b9437132be" }) {
+    strategyHash venues committedAmount makerWalletBalance
+    exposureBps maxExposureBps haltExposureBps status isPausedByMaker updatedAt
+  }
+}
+```
+
+The dashboard's `GraphExposurePanel.tsx` runs exactly this (plus an `exposureSnapshots` history
+query) straight from the deployed endpoint — current exposure table, cross-venue badges, and an
+exposure-history sparkline with zero RPC calls.
+
+The same endpoint is wrapped as an MCP server (`mcp/server.js`, zero dependencies) with three
+agent tools — `maker_exposure`, `exposure_history`, `cross_venue_positions` — so Claude/Cursor can
+answer "is this maker safe on both venues?" over stdio with no GraphQL hand-written. Run with
+`node mcp/server.js` and point any MCP client at it; the Studio query endpoint is public, so no
+API key is needed. That is the "compose 2+ Graph products" box checked: custom subgraph +
+Subgraph-MCP pattern on top.
+
+### Why Graph? (and the composability diagram)
+
+Without an indexer, every question above is a bespoke off-chain pipeline: track four Aqua events
+across N strategies, track two oracle events per maker, watch two v4 pools, join them on
+(maker, strategyHash), keep wallet balances fresh, and persist history for charts. That is five
+integrations with five failure modes — or **one shared schema**:
+
+```
+Aqua events ──┐
+              ├─► ExposurePosition (maker, strategy) ──► dashboard / keeper / MCP
+Oracle events ┤         ▲
+v4 Swaps ─────┘         └── ExposureSnapshot (history)
+```
+
+The schema is the API contract: the keeper, the frontend panel, and any future agent all read the
+same entities instead of reimplementing the join. Adding Strategy D is zero subgraph changes — ship
+it on-chain and the position appears. Adding a third venue is one poolId row, not a new service.
+That is the composability story: **the join is written once, in the open, and every consumer
+reuses it.** (Deliberately out of scope: a Substreams streaming version — the polling
+keeper + indexed snapshots already meet the demo's freshness needs. The MCP layer above was
+chosen instead as the cheaper second composed product.)
 
 ## Frontend
 

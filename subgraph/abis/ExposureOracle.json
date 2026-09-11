@@ -1,0 +1,38 @@
+[
+  {
+    "type": "event",
+    "name": "ExposureUpdated",
+    "anonymous": false,
+    "inputs": [
+      { "name": "maker", "type": "address", "indexed": true },
+      { "name": "exposureBps", "type": "uint64", "indexed": false },
+      { "name": "updatedAt", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "MakerPauseUpdated",
+    "anonymous": false,
+    "inputs": [
+      { "name": "maker", "type": "address", "indexed": true },
+      { "name": "paused", "type": "bool", "indexed": false }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "exposureOf",
+    "stateMutability": "view",
+    "inputs": [{ "name": "maker", "type": "address" }],
+    "outputs": [
+      { "name": "exposureBps", "type": "uint64" },
+      { "name": "updatedAt", "type": "uint256" }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "isPausedByMaker",
+    "stateMutability": "view",
+    "inputs": [{ "name": "maker", "type": "address" }],
+    "outputs": [{ "name": "paused", "type": "bool" }]
+  }
+]

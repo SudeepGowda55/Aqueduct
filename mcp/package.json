@@ -1,0 +1,13 @@
+{
+  "name": "aqueduct-mcp",
+  "version": "1.0.0",
+  "description": "MCP server exposing the Aqueduct exposure subgraph as cross-venue agent tools. Live Studio endpoint, no API key, zero dependencies.",
+  "type": "module",
+  "scripts": {
+    "mcp": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

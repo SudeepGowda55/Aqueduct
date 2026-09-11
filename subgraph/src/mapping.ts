@@ -1,6 +1,10 @@
-import { BigInt, Bytes } from "@graphprotocol/graph-ts";
+import { BigInt, Bytes, Address } from "@graphprotocol/graph-ts";
 import { Shipped, Pushed, Pulled, Docked } from "../generated/Aqua/Aqua";
-import { Strategy, StrategyBalance, AquaBalanceEvent } from "../generated/schema";
+import { ExposureUpdated, MakerPauseUpdated } from "../generated/ExposureOracle/ExposureOracle";
+import { Swap } from "../generated/PoolManager/PoolManager";
+import { ERC20 } from "../generated/Aqua/ERC20";
+import { ExposureOracle } from "../generated/ExposureOracle/ExposureOracle";
+import { Strategy, StrategyBalance, AquaBalanceEvent, Maker, ExposurePosition, ExposureSnapshot } from "../generated/schema";
 
 function strategyId(maker: Bytes, app: Bytes, strategyHash: Bytes): string {
   return maker.toHex() + "-" + app.toHex() + "-" + strategyHash.toHex();
@@ -82,6 +86,8 @@ export function handleShipped(event: Shipped): void {
   log.blockTimestamp = event.block.timestamp;
   log.transactionHash = event.transaction.hash;
   log.save();
+
+  touchFromAqua(event.params.maker, event.params.app, event.params.strategyHash, event.block.timestamp);
 }
 
 // Fires both for a strategy's initial balances (during `ship()`) and for any later top-up
@@ -135,6 +141,8 @@ export function handlePushed(event: Pushed): void {
   log.blockTimestamp = event.block.timestamp;
   log.transactionHash = event.transaction.hash;
   log.save();
+
+  touchFromAqua(event.params.maker, event.params.app, event.params.strategyHash, event.block.timestamp);
 }
 
 // `Aqua.pull` is only ever callable by the exact `app` a strategy was shipped to (see Aqua.sol's
@@ -165,6 +173,8 @@ export function handlePulled(event: Pulled): void {
   log.blockTimestamp = event.block.timestamp;
   log.transactionHash = event.transaction.hash;
   log.save();
+
+  touchFromAqua(event.params.maker, event.params.app, event.params.strategyHash, event.block.timestamp);
 }
 
 // `Aqua.dock` closes every token in a strategy in one call but only emits (maker, app,
@@ -200,4 +210,256 @@ export function handleDocked(event: Docked): void {
   log.blockTimestamp = event.block.timestamp;
   log.transactionHash = event.transaction.hash;
   log.save();
+
+  touchFromAqua(event.params.maker, event.params.app, event.params.strategyHash, event.block.timestamp);
+}
+
+// ---------------------------------------------------------------------------
+// ExposurePosition join (Aqua x ExposureOracle x PoolManager).
+//
+// ONE position per (maker, strategyHash). Aqua events feed committed amounts
+// (+ wallet balance via eth_call); ExposureOracle events feed exposure % and
+// pause state; PoolManager swaps confirm the uniswap-v4 venue. Thresholds are
+// hardcoded (every live strategy uses 50% / 90% -- decoding them out of raw
+// program bytes isn't worth it); the single-maker MAKER constant below exists
+// only because a bare PoolManager Swap event carries no maker -- every live
+// strategy belongs to this maker (see deployment.json).
+// ---------------------------------------------------------------------------
+
+let ORACLE_ADDRESS = Address.fromString("0xe68530d8e694ec6d237f0b07ec24c405c8cd764a");
+let TOKEN_IN = Address.fromString("0x2a22b21b15d6305abcbe78ff3098aed2f5b54869");
+let MAKER = Address.fromString("0x5067591c365d7d69d76b725c2d9af7b9437132be");
+
+let MAX_EXPOSURE_BPS = BigInt.fromI32(5000);
+let HALT_EXPOSURE_BPS = BigInt.fromI32(9000);
+
+// Uniswap v4 poolId (keccak256 of the pool key) -> strategyHash it is bound
+// to. Pool 1 (hook 0xE115..) <-> Strategy A; pool 2 (hook 0x7aec..) <->
+// Strategy F (proven: pool-2 swaps pull from 0xeb6c.. on-chain).
+function strategyForPool(poolIdHex: string): string | null {
+  if (poolIdHex == "0xeadf84808fa273e1837ebbfa022259d7e687c42f23fbea74bac849532b8ff8f8") {
+    return "0x828353ec4866ca0f45f4bf5420875cba5a8d4afc8289eb98952016effab195e2";
+  }
+  if (poolIdHex == "0xafc0c968366c3ee3a813d16d5ca0960a5dc53e908dd316d011d8c1d7b6951359") {
+    return "0xeb6cd6ba1b79355b923d569650736df8070377d7276b3fc086cafb0eac560777";
+  }
+  return null;
+}
+
+// Strategies with a bound v4 hook get both venues from birth; the Swap
+// handler re-asserts it (belt and braces) and refreshes updatedAt.
+function hasV4Venue(strategyHashHex: string): boolean {
+  return (
+    strategyHashHex == "0x828353ec4866ca0f45f4bf5420875cba5a8d4afc8289eb98952016effab195e2" ||
+    strategyHashHex == "0xeb6cd6ba1b79355b923d569650736df8070377d7276b3fc086cafb0eac560777"
+  );
+}
+
+function positionId(maker: Bytes, strategyHash: Bytes): Bytes {
+  return Bytes.fromHexString(maker.toHexString() + strategyHash.toHexString().slice(2));
+}
+
+function statusFor(exposure: BigInt, paused: boolean): string {
+  if (paused) return "PAUSED";
+  if (exposure.ge(HALT_EXPOSURE_BPS)) return "HALTED";
+  if (exposure.ge(MAX_EXPOSURE_BPS)) return "DERATED";
+  return "SAFE";
+}
+
+// Creates Maker + ExposurePosition rows if missing; registers app. Backfills
+// exposure/pause from the oracle via eth_call so positions created late (e.g.
+// from a Swap before any oracle event replays) still converge.
+function ensurePosition(maker: Bytes, app: Bytes | null, strategyHash: Bytes, blockTimestamp: BigInt): ExposurePosition {
+  let makerRow = Maker.load(maker);
+  if (makerRow == null) {
+    makerRow = new Maker(maker);
+    makerRow.positionIds = [];
+  }
+
+  const id = positionId(maker, strategyHash);
+  let pos = ExposurePosition.load(id);
+  if (pos == null) {
+    pos = new ExposurePosition(id);
+    pos.maker = maker;
+    pos.strategyHash = strategyHash;
+    const venues = new Array<string>(0);
+    venues.push("swapvm");
+    if (hasV4Venue(strategyHash.toHexString())) venues.push("uniswap-v4");
+    pos.venues = venues;
+    pos.committedAmount = BigInt.zero();
+    pos.makerWalletBalance = BigInt.zero();
+    pos.exposureBps = BigInt.zero();
+    pos.maxExposureBps = MAX_EXPOSURE_BPS;
+    pos.haltExposureBps = HALT_EXPOSURE_BPS;
+    pos.status = "SAFE";
+    pos.isPausedByMaker = false;
+    pos.updatedAt = blockTimestamp;
+    pos.apps = new Array<Bytes>(0);
+
+    const oracle = ExposureOracle.bind(ORACLE_ADDRESS);
+    const makerAddr = Address.fromBytes(maker);
+    const expCall = oracle.try_exposureOf(makerAddr);
+    if (!expCall.reverted) {
+      pos.exposureBps = expCall.value.value0;
+      pos.status = statusFor(pos.exposureBps, pos.isPausedByMaker);
+    }
+    const pauseCall = oracle.try_isPausedByMaker(makerAddr);
+    if (!pauseCall.reverted) {
+      pos.isPausedByMaker = pauseCall.value;
+      pos.status = statusFor(pos.exposureBps, pos.isPausedByMaker);
+    }
+
+    const ids = makerRow.positionIds;
+    ids.push(id.toHexString());
+    makerRow.positionIds = ids;
+    makerRow.save();
+  }
+
+  if (app) {
+    const apps = pos.apps;
+    let known = false;
+    for (let i = 0; i < apps.length; i++) {
+      if (apps[i].equals(app)) {
+        known = true;
+        break;
+      }
+    }
+    if (!known) {
+      apps.push(app);
+      pos.apps = apps;
+    }
+  }
+  return pos as ExposurePosition;
+}
+
+// Re-sums committed tokenIn across every app of this (maker, strategyHash)
+// from live StrategyBalance rows. Only ACTIVE balances count (Docked flips
+// them off in the base handlers above).
+function recomputeCommitted(pos: ExposurePosition): void {
+  let total = BigInt.zero();
+  const apps = pos.apps;
+  for (let i = 0; i < apps.length; i++) {
+    const sid = strategyId(pos.maker, apps[i], pos.strategyHash);
+    const strat = Strategy.load(sid);
+    if (strat == null) continue;
+    const tokens = strat.tokens;
+    for (let j = 0; j < tokens.length; j++) {
+      if (!tokens[j].equals(TOKEN_IN)) continue;
+      const bal = StrategyBalance.load(sid + "-" + tokens[j].toHexString());
+      if (bal != null && bal.active) total = total.plus(bal.amount);
+    }
+  }
+  pos.committedAmount = total;
+}
+
+// Wallet balance is NOT an event -- live balanceOf() eth_call on every
+// Aqua-side touch. Reverted calls keep the previous value.
+function refreshWallet(pos: ExposurePosition): void {
+  const token = ERC20.bind(TOKEN_IN);
+  const call = token.try_balanceOf(Address.fromBytes(pos.maker));
+  if (!call.reverted) pos.makerWalletBalance = call.value;
+}
+
+function writeSnapshot(pos: ExposurePosition, blockNumber: BigInt, blockTimestamp: BigInt, txHash: Bytes, logIndex: BigInt): void {
+  const idHex = pos.id.toHexString();
+  const snap = new ExposureSnapshot(
+    txHash.toHexString() + "-" + logIndex.toString() + "-" + idHex.slice(idHex.length - 8, idHex.length)
+  );
+  snap.maker = pos.maker;
+  snap.strategyHash = pos.strategyHash;
+  snap.exposureBps = pos.exposureBps;
+  snap.status = pos.status;
+  snap.blockNumber = blockNumber;
+  snap.blockTimestamp = blockTimestamp;
+  snap.save();
+}
+
+// Called at the end of every Aqua handler (after the base StrategyBalance
+// bookkeeping above has saved).
+function touchFromAqua(maker: Bytes, app: Bytes, strategyHash: Bytes, blockTimestamp: BigInt): void {
+  const pos = ensurePosition(maker, app, strategyHash, blockTimestamp);
+  recomputeCommitted(pos);
+  refreshWallet(pos);
+  pos.status = statusFor(pos.exposureBps, pos.isPausedByMaker);
+  pos.updatedAt = blockTimestamp;
+  pos.save();
+}
+
+// Fan-out for maker-level oracle events: updates EVERY position of the maker
+// (via Maker.positionIds) and writes one snapshot per position.
+function touchFromOracle(
+  maker: Bytes,
+  exposure: BigInt | null,
+  paused: boolean,
+  hasPaused: boolean,
+  blockNumber: BigInt,
+  blockTimestamp: BigInt,
+  txHash: Bytes,
+  logIndex: BigInt
+): void {
+  const makerRow = Maker.load(maker);
+  if (makerRow == null) return;
+  const ids = (makerRow as Maker).positionIds;
+  for (let i = 0; i < ids.length; i++) {
+    const pos = ExposurePosition.load(Bytes.fromHexString(ids[i]));
+    if (pos == null) continue;
+    const p = pos as ExposurePosition;
+    if (exposure) p.exposureBps = exposure;
+    if (hasPaused) p.isPausedByMaker = paused;
+    p.status = statusFor(p.exposureBps, p.isPausedByMaker);
+    p.updatedAt = blockTimestamp;
+    p.save();
+    writeSnapshot(p, blockNumber, blockTimestamp, txHash, logIndex);
+  }
+}
+
+export function handleExposureUpdated(event: ExposureUpdated): void {
+  touchFromOracle(
+    event.params.maker,
+    event.params.exposureBps,
+    false,
+    false,
+    event.block.number,
+    event.block.timestamp,
+    event.transaction.hash,
+    event.logIndex
+  );
+}
+
+export function handleMakerPauseUpdated(event: MakerPauseUpdated): void {
+  touchFromOracle(
+    event.params.maker,
+    null,
+    event.params.paused,
+    true,
+    event.block.number,
+    event.block.timestamp,
+    event.transaction.hash,
+    event.logIndex
+  );
+}
+
+// A swap on a whitelisted v4 pool re-asserts the uniswap-v4 venue on the bound
+// position. Pool -> strategy mapping is hardcoded (no factory/discovery
+// events exist); unknown pools are ignored. Maker is the deployment's single
+// maker -- bare Swap events carry no maker field.
+export function handlePoolSwap(event: Swap): void {
+  const hashHex = strategyForPool(event.params.id.toHexString());
+  if (hashHex) {
+    const pos = ensurePosition(MAKER, null, Bytes.fromHexString(hashHex), event.block.timestamp);
+    const venues = pos.venues;
+    let has = false;
+    for (let i = 0; i < venues.length; i++) {
+      if (venues[i] == "uniswap-v4") {
+        has = true;
+        break;
+      }
+    }
+    if (!has) {
+      venues.push("uniswap-v4");
+      pos.venues = venues;
+    }
+    pos.updatedAt = event.block.timestamp;
+    pos.save();
+  }
 }

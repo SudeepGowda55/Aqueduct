@@ -46,3 +46,54 @@ type AquaBalanceEvent @entity(immutable: true) {
   blockTimestamp: BigInt!
   transactionHash: Bytes!
 }
+
+enum ExposureStatus {
+  SAFE
+  DERATED
+  HALTED
+  PAUSED
+}
+
+# Internal index: every ExposurePosition id belonging to a maker, so the
+# ExposureOracle handlers can fan a maker-level event out to all positions.
+type Maker @entity(immutable: false) {
+  id: Bytes! # maker address
+  positionIds: [String!]!
+}
+
+# ONE position per (maker, strategyHash), joined from TWO contracts: Aqua's
+# Shipped/Pushed/Pulled/Docked (committed amounts, wallet balance via eth_call)
+# and ExposureOracle's ExposureUpdated/MakerPauseUpdated (exposure %, pause).
+# `venues` lists every venue this position fills on (e.g. ["swapvm",
+# "uniswap-v4"]) -- a v4 hook bound to the strategy adds the second entry.
+type ExposurePosition @entity(immutable: false) {
+  id: Bytes! # maker bytes ++ strategyHash bytes
+  maker: Bytes!
+  strategyHash: Bytes!
+  venues: [String!]!
+  committedAmount: BigInt!
+  makerWalletBalance: BigInt!
+  exposureBps: BigInt!
+  maxExposureBps: BigInt!
+  haltExposureBps: BigInt!
+  status: ExposureStatus!
+  isPausedByMaker: Boolean!
+  updatedAt: BigInt!
+  # Internal bookkeeping (extension beyond the shared shape): every app this
+  # (maker, strategyHash) has been shipped to, so committedAmount can be
+  # re-summed across apps from StrategyBalance rows. Not for display.
+  apps: [Bytes!]!
+}
+
+# Immutable point-in-time reading per position, written on every
+# ExposureUpdated (and pause flip), so exposure-over-time charts
+# (10% -> 40% -> 70% -> 90%) are a single ordered query.
+type ExposureSnapshot @entity(immutable: true) {
+  id: ID! # `${tx.hash.toHex()}-${logIndex}-${positionIdSuffix}`
+  maker: Bytes!
+  strategyHash: Bytes!
+  exposureBps: BigInt!
+  status: ExposureStatus!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+}
