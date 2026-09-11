@@ -18,6 +18,7 @@ const PRESETS = [
   { label: "Safe (10%)", bps: 1_000 },
   { label: "Derated (70%)", bps: 7_000 },
   { label: "Halted (90%)", bps: 9_000 },
+  { label: "Malicious (100%)", bps: 10_000 },
 ];
 
 export function KeeperPanel() {
@@ -50,7 +51,9 @@ export function KeeperPanel() {
         Stands in for the off-chain Graph pipeline (see <code>subgraph/</code> +{" "}
         <code>keeper/pushExposure.ts</code>), which would push this same value automatically in
         production. Use it to move the maker&apos;s reported exposure and watch both swap panels
-        react.
+        react. &quot;Malicious (100%)&quot; pushes <code>ExposureOracle</code>&apos;s own real
+        on-chain maximum -- an intentionally bad reading, still only ever able to halt a fill, never
+        improve one.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         {PRESETS.map((preset) => (

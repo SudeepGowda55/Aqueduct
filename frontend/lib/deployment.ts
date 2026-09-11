@@ -19,6 +19,11 @@ export interface V4Deployment {
   poolKey: PoolKeyJson;
 }
 
+export interface NamedStrategy {
+  label: string;
+  strategyHash: string;
+}
+
 export interface Deployment {
   chainId: number;
   maker: string;
@@ -33,6 +38,11 @@ export interface Deployment {
   haltExposureBps: number;
   order: DeploymentOrder;
   v4?: V4Deployment;
+  // Every Aqua strategy this maker has actually shipped and labeled for the dashboard -- NOT a
+  // fixed "A/B/C" schema. Absent (or a single entry) on deployments that have only ever shipped
+  // one strategy; AggregateExposurePanel renders however many real entries exist and shows the
+  // rest as explicitly unshipped, rather than inventing data to match a fixed slot count.
+  strategies?: NamedStrategy[];
 }
 
 export async function loadDeployment(): Promise<Deployment> {
