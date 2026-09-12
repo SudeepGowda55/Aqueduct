@@ -1,7 +1,7 @@
 # Aqueduct exposure MCP server
 
 A minimal (zero-dependency, stdio JSON-RPC) MCP server that wraps the deployed
-[exposure subgraph](https://api.studio.thegraph.com/query/1758739/ethonline/v0.2.0) as agent
+[exposure subgraph](https://api.studio.thegraph.com/query/1758739/ethonline/v0.3.0) as agent
 tools — so Claude, Cursor, or any other MCP client can answer "is this maker safe on both
 venues?" without anyone hand-writing GraphQL.
 
@@ -16,6 +16,7 @@ for the full composability story.
 | `maker_exposure` | Every `ExposurePosition` for a maker — venues, committed amount, wallet balance, exposure %, status. |
 | `exposure_history` | Ordered `ExposureSnapshot` readings over time, for charting 10% → 40% → 70% → 90%. |
 | `cross_venue_positions` | Only the positions that fill on *both* SwapVM and Uniswap v4 (`venues` includes `"uniswap-v4"`) — the killer cross-venue query, as a tool. |
+| `messari_swaps` | Recent `Swap` rows in Messari DEX-AMM shape (`pool { inputTokens }`, `tokenIn/amountIn`, `tokenOut/amountOut`) — the standards-leverage proof as a tool. |
 
 ## Run it
 

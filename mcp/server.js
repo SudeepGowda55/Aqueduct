@@ -1,12 +1,12 @@
 // Aqueduct MCP server (stdio): the "compose 2+ Graph products" moment.
-// Wraps the deployed exposure subgraph (Studio `ethonline` v0.2.0) as agent
+// Wraps the deployed exposure subgraph (Studio `ethonline` v0.3.0) as agent
 // tools, so Claude/Cursor/Cline can answer "is this maker safe on both
 // venues?" without writing GraphQL. The Studio query endpoint is public —
 // no API key needed.
 //
 // Run: node server.js
 // Speak JSON-RPC per line: {"jsonrpc":"2.0","id":1,"method":"tools/list"}
-const SUBGRAPH_URL = "https://api.studio.thegraph.com/query/1758739/ethonline/v0.2.0";
+const SUBGRAPH_URL = "https://api.studio.thegraph.com/query/1758739/ethonline/v0.3.0";
 
 const TOOLS = [
   {
