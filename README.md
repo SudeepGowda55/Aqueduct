@@ -43,6 +43,76 @@ Makes the exact same Aqua liquidity, under the exact same exposure constraint, a
 a Uniswap v4 pool — proving the risk policy travels with the *liquidity strategy*, not with any
 one execution venue. [`src/hooks/AquaV4Hook.sol`](src/hooks/AquaV4Hook.sol).
 
+## Uniswap v4 contribution
+
+This isn't "a hook we bolted on to also qualify for a second track." It's the load-bearing proof
+of the whole project's central claim — that exposure-gated liquidity is a property of the
+**strategy**, not of any one execution venue — and along the way it required solving a real,
+non-obvious v4 problem generically enough that we extracted it into a reusable base contract.
+
+**The hard v4 problem, solved for real:** `PoolManager`'s flash accounting only credits a
+swapper's payment to the pool's real reserves *after* `PoolManager.swap()` returns — so a hook
+that wants to synchronously hand back liquidity sourced from *outside* the pool (not the pool's own
+curve) cannot `take()` the swapper's input inside `beforeSwap`; the manager isn't holding it yet.
+`AquaV4Hook` solves this with a working-capital float: it mints itself ERC-6909 claims for the
+swapper's input (legal, since claims are accounting entries, not a real-balance check), funds the
+external leg — a real Aqua maker strategy, executed through its full exposure-gated SwapVM program
+— from its own pre-seeded balance, settles the real output to the swapper, and later reconciles the
+float via a permissionless `sweepClaims()`. Full mechanism:
+[`src/hooks/AquaV4Hook.sol`](src/hooks/AquaV4Hook.sol) lines 23–40 (contract-level doc) and
+[lines 80–88](src/hooks/AquaV4Hook.sol#L80-L88) (`_fillFromExternalLiquidity` itself); the
+shared claims/float/settle/sweep machinery it runs inside lives in
+[`src/hooks/AsyncLiquidityHook.sol`](src/hooks/AsyncLiquidityHook.sol#L154-L174) (`_beforeSwap`).
+
+**Extracted into a reusable base, not kept as a private detail:**
+[`src/hooks/AsyncLiquidityHook.sol`](src/hooks/AsyncLiquidityHook.sol) implements that entire
+claims → float → settle → sweep sequence as an `abstract contract` any hook can inherit — an
+integrator implements exactly one method, `_fillFromExternalLiquidity`. We proved it's genuinely
+generic, not secretly shaped around Aqua, with **two independent implementations against a real
+`PoolManager`**:
+- [`src/hooks/AquaV4Hook.sol`](src/hooks/AquaV4Hook.sol) — the real integration, live on Base
+  Sepolia, proven in [`test/AquaV4Hook.t.sol`](test/AquaV4Hook.t.sol) (6 tests).
+- [`test/mocks/FixedRateAsyncHook.sol`](test/mocks/FixedRateAsyncHook.sol) — a deliberately
+  trivial fixed-rate hook sharing zero code or state with the first, proven in
+  [`test/AsyncLiquidityHook.t.sol`](test/AsyncLiquidityHook.t.sol) (5 tests, including that
+  `sweepClaims` — shared, untouched base-contract code — reconciles the float correctly for this
+  completely different implementation too).
+
+**Why it's not just "using a hook" — it's stress-testing what v4 hooks can safely do:**
+`AquaV4Hook`'s pool carries *zero* liquidity of its own — every fill, in both directions, on real
+Base Sepolia transactions, comes from external state the hook has no privileged access to bypass
+(`Aqua.pull` only accepts calls from the exact registered `app`, so the *only* way to draw the
+maker's funds is a real `swapVM.swap()` call, running the maker's *entire* program, exposure gate
+included). [`test/CrossVenueConsistency.t.sol`](test/CrossVenueConsistency.t.sol) then proves this
+external-liquidity-sourcing hook produces **bit-for-bit identical output** to a direct SwapVM call
+under the identical exposure state — verified with real, non-simulated transactions on Base
+Sepolia, not just in a test EVM.
+
+**A second, independent v4 capability on top of the first — risk-adjusted dynamic fees:**
+`AquaV4Hook`'s `beforeSwapReturnDelta` pricing override (above) is one v4 mechanism; this is a
+different one, stacked on top rather than replacing it. Pools bound to this hook can opt in
+(purely via the pool's own `PoolKey.fee` at initialization — `LPFeeLibrary.DYNAMIC_FEE_FLAG`
+instead of a static value) to a swap fee that scales with the *same* maker's live `ExposureOracle`
+reading that already drives `_exposureGate1D`'s SwapVM-side derate/halt — one real-time risk signal,
+expressed through two completely different protocols' native mechanisms simultaneously. The fee is
+a linear curve from 5 bps (unexposed) to 100 bps (approaching the same 90% halt line the gate
+itself uses), applied two ways: a per-swap override returned from `beforeSwap`
+(`LPFeeLibrary.OVERRIDE_FEE_FLAG`, mirroring `uniswap-hooks`'s own `BaseOverrideFee` pattern) that
+actually reduces what the taker receives, and a persisted `updateDynamicLPFee` call via a
+permissionless `refreshFee()` (mirroring `BaseDynamicFee`'s `_poke` pattern) so the pool's fee is
+independently queryable via `StateLibrary.getSlot0` — no swap required. Static-fee pools bound to
+the exact same hook source (including the one `CrossVenueConsistencyTest` proves bit-for-bit
+identical to the direct SwapVM path) are completely unaffected — proven directly, not just
+inferred, in [`test/DynamicFeeHook.t.sol`](test/DynamicFeeHook.t.sol) (6 tests). Live on Base
+Sepolia: see [Live on Base Sepolia](#live-on-base-sepolia) below.
+
+**Uniswap developer feedback:** [`FEEDBACK.md`](FEEDBACK.md) — the specific friction points above
+(the flash-accounting settlement order, the missing reference pattern for synchronous
+external-liquidity hooks, a `HookMiner` deployer gotcha, and a real bug of our own caught only by
+independently reading on-chain storage after conflating the dynamic-fee override with persisted
+fee state), submitted via the
+[Uniswap Developer Feedback Form](https://developers.uniswap.org/hackathon-feedback).
+
 ## Live on Base Sepolia
 
 Every contract below is really deployed and really exercised on Base Sepolia (chain id `84532`)
@@ -54,14 +124,42 @@ frontend.
 |---|---|
 | `Aqua` | [`0x2e706D0c3a6d9C8d62Bb3276Ff9a1a04e9108461`](https://sepolia.basescan.org/address/0x2e706D0c3a6d9C8d62Bb3276Ff9a1a04e9108461) |
 | `ExposureOracle` | [`0xE68530d8e694eC6d237F0B07eC24C405c8Cd764A`](https://sepolia.basescan.org/address/0xE68530d8e694eC6d237F0B07eC24C405c8Cd764A) |
-| `ExposureAwareAquaRouter` (SwapVM) | [`0xC008DD3D1293543d5FA7AD6eED285eD45E3d7cCc`](https://sepolia.basescan.org/address/0xC008DD3D1293543d5FA7AD6eED285eD45E3d7cCc) |
-| `AquaV4Hook` (Strategy A pool) | [`0xE115c49376c960B29D0bD77bF8C226a9562EAa88`](https://sepolia.basescan.org/address/0xE115c49376c960B29D0bD77bF8C226a9562EAa88) |
-| `AquaV4Hook` (Strategy F pool) | [`0x7aec9fb4edc2aff6c016cbb807e4f466d5c82a88`](https://sepolia.basescan.org/address/0x7aec9fb4edc2aff6c016cbb807e4f466d5c82a88) |
+| `ExposureAwareAquaRouter` (SwapVM) | [`0x00449DD6DCD06327d0ae98f013CfFb7426658B21`](https://sepolia.basescan.org/address/0x00449DD6DCD06327d0ae98f013CfFb7426658B21) |
+| `AquaV4Hook` (Strategy A pool, static fee — the bit-for-bit-identical-to-SwapVM pool) | [`0xc806b36637A58583458F00f431ff66b14667aA88`](https://sepolia.basescan.org/address/0xc806b36637A58583458F00f431ff66b14667aA88) |
+| `AquaV4Hook` (Strategy A pool, risk-adjusted dynamic fee — see below) | [`0x0D2900ad215003D2b2aBBAa127b321c80e35eA88`](https://sepolia.basescan.org/address/0x0D2900ad215003D2b2aBBAa127b321c80e35eA88) |
+| Strategy P — price + risk aware position (see below) | strategy hash `0xe3f9f24ede56f811c1201b8811f731d7d0f91b8bd2aea824b272ad201c0bcd88` |
 
 Live off-chain links: dashboard [`aqueduct-protocol.vercel.app`](https://aqueduct-protocol.vercel.app/) ·
 subgraph on [Subgraph Studio (`ethonline`, v0.2.0)](https://thegraph.com/studio/subgraph/ethonline) ·
-[query endpoint](https://api.studio.thegraph.com/query/1758739/ethonline/v0.2.0) ·
-keeper push [`0x19550d…9cac`](https://sepolia.basescan.org/tx/0x19550d3f6e2162f901f39eab8d00657aab6eae6e0ce5111907898625441b9cac) (10000 bps, mined block 46688226).
+[query endpoint](https://api.studio.thegraph.com/query/1758739/ethonline/v0.2.0).
+
+### A real bug found during live testing, and how it was actually fixed
+
+While demoing the maker-pause kill switch live, the *oracle* correctly recorded the pause and
+emitted the right event, but a real swap against the then-live `ExposureAwareAquaRouter` still
+went through. Root cause, confirmed with `cast run` against the actual failing transaction (not
+inferred): `_exposureGate1D` — like every SwapVM instruction — is an **internal Solidity
+function**, compiled directly into whichever router inherits it. It is never called externally.
+`ExposureOracle.setPausedByMaker` had been added to the source and a *new oracle* deployed to pick
+it up ([`script/AqueductRedeployOracle.s.sol`](script/AqueductRedeployOracle.s.sol)), but that
+script reused the *existing* router — bytecode compiled before the pause check existed in source —
+so `isPausedByMaker` was never actually invoked at runtime on that router, on either venue, even
+though every Foundry test passed (tests always deploy a fresh router from current source, so they
+could never have caught this).
+
+An earlier attempt to verify the same fix was itself a false positive: it checked only whether a
+call reverted, not *why* — the revert it saw was an unrelated insufficient-balance failure, not the
+pause check. The actual fix
+([`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol)) deploys a fresh router from
+current source and re-ships every strategy under it (`Aqua.pull`/`push` are keyed by
+`_balances[maker][app][strategyHash][token]`, so a new router address is a new `app` identity —
+strategies are re-created, not migrated), then verifies the fix by decoding the **exact revert
+selector** on both the direct SwapVM and Uniswap v4 paths — `bytes4(revertData) ==
+ExposureGate.ExposureGateMakerPaused.selector`, not just success/failure — before unpausing and
+confirming a real swap restores normally. Both the script's own on-chain assertions and an
+independent post-deploy `cast call` (see the commit history / broadcast artifacts under
+[`broadcast/AqueductV2Redeploy.s.sol/`](broadcast/AqueductV2Redeploy.s.sol/)) confirm the pause now
+genuinely halts both venues.
 
 The v4 side deliberately does **not** deploy its own `PoolManager` or swap router — it uses
 Uniswap's own real Base Sepolia deployment ([`PoolManager` at `0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408`](https://sepolia.basescan.org/address/0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408),
@@ -72,15 +170,47 @@ freshly deployed, since it has to be: it's this project's own contract, CREATE2-
 the right permission flags in its address the way every v4 hook must.
 
 `ExposureOracle.setPausedByMaker` (the maker's own emergency kill switch, see [Threat
-model](#threat-model) below) was added after the *original* Base Sepolia deployment, so this
-`ExposureOracle` address is a redeploy that picked it up
-([`script/AqueductRedeployOracle.s.sol`](script/AqueductRedeployOracle.s.sol) — reuses the
-unaffected `Aqua`/`ExposureAwareAquaRouter`/tokens/maker/keeper as-is, and only deploys what
-actually depends on the new oracle code: the oracle itself, a new order/strategy pointing at it,
-and a fresh `AquaV4Hook` + pool bound to that new order). The redeploy's own on-chain verification
-pushed a safe reading, ran one real swap on each venue, then proved the pause genuinely halts a
-fill (`ExposureGateMakerPaused`) before immediately unpausing — the maker's strategy is live and
-usable, not left stuck halted.
+model](#threat-model) below) was added in two stages on Base Sepolia:
+[`script/AqueductRedeployOracle.s.sol`](script/AqueductRedeployOracle.s.sol) first redeployed only
+the oracle to add the flag/storage, which is why the pause bug above wasn't caught immediately —
+and [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol) then redeployed the
+*router* too, which is the piece that actually had to change since the pause check compiles into
+it. `AquaV2Redeploy` also re-shipped Strategies A/B/C under the new router and shipped a new
+composed position (see below); its on-chain verification re-pushed a safe reading, ran one real
+swap on each venue, then proved the pause genuinely halts a fill with the exact expected
+selector before immediately unpausing — the maker's strategies are live and usable, not left stuck
+halted.
+
+### Strategy P — a sophisticated position stacking three instructions
+
+Alongside the plain exposure-gated strategies, one maker program on Base Sepolia composes three
+SwapVM instructions in sequence: `_xycSwapXD` (prices the swap) → `_oraclePriceAdjuster1D`
+(1inch's own instruction, pointed at a real, independently-verified Chainlink ETH/USD feed at
+[`0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1`](https://sepolia.basescan.org/address/0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1)
+— only ever *improves* the taker's price toward the oracle, capped at a max +3% adjustment) →
+`_exposureGate1D` (the same risk gate as every other strategy here). The composition order matters:
+the derate/halt applies *on top of* whatever the price adjuster already did, so a favorable oracle
+reading can never be used to bypass a halt. See
+[`test/SophisticatedPosition.t.sol`](test/SophisticatedPosition.t.sol) for the exact-formula proof
+this mirrors, and [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol) for the real
+Base Sepolia shipment (strategy hash
+`0xe3f9f24ede56f811c1201b8811f731d7d0f91b8bd2aea824b272ad201c0bcd88`).
+
+### The dynamic-fee pool — the same maker, the same oracle, a second Uniswap mechanism
+
+A second, additional v4 pool ([`script/AqueductV3DynamicFee.s.sol`](script/AqueductV3DynamicFee.s.sol))
+binds a fresh `AquaV4Hook` to the *exact same* already-shipped Strategy A order and oracle, but
+initializes the pool with `LPFeeLibrary.DYNAMIC_FEE_FLAG` instead of a static fee — the existing
+Strategy A pool above is completely untouched. Verified for real on Base Sepolia: at 10% exposure
+the fee is 1555 pips (of the 500–10,000 pip range), and raising exposure to 70% raised it to 7888
+pips, both matching the exact predicted formula (`require`-checked in the script, not just logged),
+and `refreshFee()` independently persisted the fee with zero swaps involved — confirmed afterward
+by reading the pool's raw storage via `extsload` directly (poolId
+`0x7bf07bfabe7eb1773eb3be5a319ddbaa59db133427d56e0508ad6c42958d047a`), the same
+"don't trust your own script's report, verify the real outcome" discipline that caught the
+maker-pause bug above. See [`test/DynamicFeeHook.t.sol`](test/DynamicFeeHook.t.sol) for the local
+proof and [`FEEDBACK.md`](FEEDBACK.md) for a real bug this uncovered in our own first version of
+the verification script.
 
 ## Where to look
 
@@ -91,9 +221,18 @@ usable, not left stuck halted.
 | Stock `AquaOpcodes` + the new instruction appended at the end (index 35), every existing index preserved | [`src/opcodes/ExposureAquaOpcodes.sol`](src/opcodes/ExposureAquaOpcodes.sol) |
 | The deployable router wiring it together | [`src/routers/ExposureAwareAquaRouter.sol`](src/routers/ExposureAwareAquaRouter.sol) |
 | Proof of the safety claim: 15 tests incl. two 257-run fuzz properties and a malicious-oracle narrative | [`test/ExposureGate.t.sol`](test/ExposureGate.t.sol) |
+| Stateful-fuzz invariant suite: a handler drives random pushes/pauses/swaps for 128,000 calls, checked against ghost accounting per token | [`test/ExposureGateInvariant.t.sol`](test/ExposureGateInvariant.t.sol) |
+| The composed price-adjuster + exposure-gate position ("Strategy P"), with the exact-formula proof both bounds hold from either direction | [`test/SophisticatedPosition.t.sol`](test/SophisticatedPosition.t.sol) |
+| The real fix for the maker-pause bug: fresh router, re-shipped strategies, new sophisticated position, exact-selector fix verification | [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol) |
+| The risk-adjusted dynamic-fee capability: per-swap fee override + persisted `updateDynamicLPFee`, both driven by the same exposure oracle | [`src/hooks/AquaV4Hook.sol`](src/hooks/AquaV4Hook.sol) (`_applyFee`, `_riskFeePips`, `refreshFee`) |
+| Proof the dynamic fee is opt-in per pool (a static-fee pool bound to the same hook code is untouched) and matches the exact predicted formula at every exposure level | [`test/DynamicFeeHook.t.sol`](test/DynamicFeeHook.t.sol) |
+| The real Base Sepolia deployment of the dynamic-fee pool, verified against exact `require`d formulas and independently re-checked via raw storage reads | [`script/AqueductV3DynamicFee.s.sol`](script/AqueductV3DynamicFee.s.sol) |
 | End-to-end demo as real broadcast transactions on a local chain | [`script/AqueductDemo.s.sol`](script/AqueductDemo.s.sol) |
 | The Uniswap v4 hook that sources swaps from the same exposure-gated maker strategy | [`src/hooks/AquaV4Hook.sol`](src/hooks/AquaV4Hook.sol) |
 | Proof the hook actually moves real tokens through a real `PoolManager`, and that the exposure gate halts a v4 swap too | [`test/AquaV4Hook.t.sol`](test/AquaV4Hook.t.sol) |
+| The reusable v4 base contract extracted from `AquaV4Hook`: claims/float/settle/sweep for any hook sourcing fills from external liquidity | [`src/hooks/AsyncLiquidityHook.sol`](src/hooks/AsyncLiquidityHook.sol) |
+| A second, independent (non-Aqua) implementation of that base, proving it's genuinely generic | [`test/mocks/FixedRateAsyncHook.sol`](test/mocks/FixedRateAsyncHook.sol) / [`test/AsyncLiquidityHook.t.sol`](test/AsyncLiquidityHook.t.sol) |
+| Real Uniswap v4 developer feedback from building this (submitted via their feedback form) | [`FEEDBACK.md`](FEEDBACK.md) |
 | Proof the SAME maker's exposure policy produces bit-for-bit identical fills whether the swap runs through SwapVM directly or through the Uniswap v4 pool | [`test/CrossVenueConsistency.t.sol`](test/CrossVenueConsistency.t.sol) |
 | Proof of the "multiplier effect" thesis itself: one maker's aggregate exposure across several Aqua strategies gates all of them identically, even a strategy that looks safe in isolation | [`test/MultiStrategyExposure.t.sol`](test/MultiStrategyExposure.t.sol) |
 | The full chain connected end to end: multiple strategies → aggregate exposure → oracle → SwapVM (derated/halt), same reading → Uniswap v4 (same result) | [`test/EndToEndAggregateExposure.t.sol`](test/EndToEndAggregateExposure.t.sol) |
@@ -164,7 +303,7 @@ forge install   # pulls in swap-vm, aqua, and uniswap-hooks as dependencies
 forge test -vv
 ```
 
-31 tests across six suites, all passing:
+49 tests across ten suites, all passing:
 
 **`ExposureGate.t.sol`** (15 tests) — the opcode itself, called directly through SwapVM:
 - pass-through below the exposure threshold (exact equality with an ungated baseline), including
@@ -247,6 +386,38 @@ against that oracle entry even at 0% exposure with a perfectly fresh reading, un
 normal gating exactly, and an attacker calling `setPausedByMaker` only ever pauses *their own*
 (nonexistent) strategy — `msg.sender`-scoped by construction, so there is no code path for pausing
 someone else's.
+
+**`ExposureGateInvariant.t.sol`** (2 invariants, 128,000 calls each) — where the property-fuzz
+tests above check one call with random inputs, this runs long random *sequences* of
+ship/push-exposure/pause/swap (Foundry's stateful invariant fuzzing) and, on every single swap
+attempt, asserts the real result matches exactly what the gate's own formula predicts from
+whatever state that specific call happens to land on — proving the fail-closed guarantee survives
+arbitrary interleavings of state changes, not just isolated calls. A second invariant
+independently cross-checks Aqua's own committed-balance bookkeeping against ghost accounting
+tracked outside the contract, across the same random runs.
+
+**`SophisticatedPosition.t.sol`** (5 tests) — a maker program composing *three* SwapVM
+instructions, not one: `_xycSwapXD` → `_oraclePriceAdjuster1D` → `_exposureGate1D`. The middle
+instruction is 1inch's own `OraclePriceAdjuster` — already shipped in `swap-vm`, but never wired
+into stock `AquaOpcodes` until this project. Composed together, a taker's fill is bounded from
+*both* directions by two independent, opposite-facing oracles: the price adjuster can only ever
+improve the fill toward a real Chainlink feed (capped), and the exposure gate can only ever worsen
+it toward the maker's real risk (capped the other way) — and neither can override the other's
+direction. Proven exactly: a favorable price genuinely improves the fill up to its cap, an
+absurd/malicious price is still capped at exactly the same bound, and even the *most* favorable
+possible price cannot bypass a halt.
+
+**`AsyncLiquidityHook.t.sol`** (5 tests) — see [Uniswap v4 contribution](#uniswap-v4-contribution)
+above: proves the reusable base contract works correctly for a completely independent, non-Aqua
+implementation against a real `PoolManager`, including that `sweepClaims` (shared, untouched base
+code) reconciles the float correctly.
+
+**`DynamicFeeHook.t.sol`** (6 tests) — the second, independent v4 capability: a fee floor at 0%
+exposure matching the exact predicted formula; the fee scaling with exposure below the gate's own
+derate threshold; the fee compounding *on top of* the gate's derate once exposure enters that band
+(not replacing it); the fee saturating at its documented ceiling approaching halt; `refreshFee()`
+persisting the current fee with zero swaps involved (checked via `StateLibrary.getSlot0`); and a
+second pool bound to the same hook source but a static fee, proven byte-for-byte unaffected.
 
 Two real engineering constraints surfaced while building the hook, both documented in code where
 they're handled rather than glossed over here:
@@ -478,10 +649,16 @@ On top of the balance bookkeeping above, the subgraph maintains **one `ExposureP
   thresholds — every live strategy uses them, so no program-byte decoding). Maker-level events fan
   out to every position via an internal `Maker.positionIds` index, and each fan-out writes an
   immutable **`ExposureSnapshot`** — exposure-over-time (10% → 40% → 70% → 90%) is one ordered query.
-- **Uniswap v4 PoolManager** (`Swap`) → confirms the `uniswap-v4` venue. The two hook-bound pools
-  are hardcoded as poolId → strategy (`0xeadf…` → Strategy A, `0xafc0…` → Strategy F — the latter
-  proven by correlating a pool-2 swap with the `Pulled` event in the same transaction); all other
-  pools are ignored. No factory/discovery events exist, so this mapping is intentionally manual.
+- **Uniswap v4 PoolManager** (`Swap`) → confirms the `uniswap-v4` venue. The hook-bound pool is
+  hardcoded as poolId → strategy; all other pools are ignored. No factory/discovery events exist,
+  so this mapping is intentionally manual — **and it goes stale whenever the router or hook is
+  redeployed**, since a new router is a new `app` identity (new `strategyHash`) and a new hook is a
+  new pool (new poolId). After [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol)
+  (see [Live on Base Sepolia](#live-on-base-sepolia) above), the current mapping needs to become
+  poolId `0x54e7faa821dfc1832bcf0f16aa0e8545c5f142e9a9c6e9962b05f2dec3948b76` → strategy hash
+  `0x0581e5d8783c51f4d45d190a41fee043d7859b8998373296acfc618baa0e64e7` (Strategy A, re-shipped under
+  the new router) — independently confirmed by decoding the real `Initialize` event emitted on
+  `PoolManager` in the redeploy's own broadcast transaction, not just computed offline.
 
 The killer query — one `exposurePositions(where: {maker: ...})` returning the SwapVM *and* Uniswap
 v4 view of the same position, with `venues: ["swapvm", "uniswap-v4"]` on Strategies A and F:
@@ -571,6 +748,15 @@ Alchemy/Infura key client-side, since that file ships to every visitor's browser
 - **Two swap panels**, side by side, backed by the same maker strategy: one calls
   `SwapVM.swap(...)` directly, the other calls Uniswap v4's `PoolSwapTest.swap(...)` through
   `AquaV4Hook`. Both work from a plain connected wallet, no deployed contract required as taker.
+- **A Strategy P panel** — swaps through the three-instruction composed position (price adjuster +
+  exposure gate), and shows the live Chainlink ETH/USD reading `_oraclePriceAdjuster1D` is actually
+  reading right now, not a static number (`SophisticatedPositionPanel.tsx`).
+- **A dynamic-fee pool panel** — the second Uniswap v4 capability made visible: shows the
+  *predicted* fee (computed client-side from the same live `ExposureOracle` reading the contract
+  itself reads) next to the *persisted* on-chain fee (read directly off `PoolManager`'s own storage
+  via `extsload`, the same mechanism `StateLibrary.getSlot0` uses), a button that calls the
+  permissionless `refreshFee()` for real, and a swap that settles net of the fee
+  (`DynamicFeePoolPanel.tsx`).
 - **An ungated-vs-gated comparison panel** — types an amount once and shows it priced two ways
   from the maker's *live* pool reserves: what the constant-product curve alone would give up (no
   exposure gate at all) next to what it actually gives up right now, plus the resulting liquidity

@@ -24,6 +24,31 @@ export interface NamedStrategy {
   strategyHash: string;
 }
 
+// Strategy P: xyc -> oraclePriceAdjuster (real Chainlink feed) -> exposureGate, composed in one
+// program. See script/AqueductV2Redeploy.s.sol and test/SophisticatedPosition.t.sol.
+export interface SophisticatedPosition {
+  label: string;
+  strategyHash: string;
+  priceOracle: string;
+  maxPriceDecay: string;
+  order: DeploymentOrder;
+}
+
+// A SECOND, additional v4 pool bound to the same Strategy A order and oracle as `v4` above, but
+// initialized with LPFeeLibrary.DYNAMIC_FEE_FLAG -- a risk-adjusted swap fee on top of the same
+// exposure reading that drives the SwapVM-side gate. See src/hooks/AquaV4Hook.sol (_applyFee,
+// _riskFeePips, refreshFee) and script/AqueductV3DynamicFee.s.sol.
+export interface DynamicFeePool {
+  label: string;
+  hook: string;
+  poolId: string;
+  poolKey: PoolKeyJson;
+  minFeePips: number;
+  maxFeePips: number;
+  feeSaturationBps: number;
+  note?: string;
+}
+
 export interface Deployment {
   chainId: number;
   maker: string;
@@ -43,6 +68,8 @@ export interface Deployment {
   // one strategy; AggregateExposurePanel renders however many real entries exist and shows the
   // rest as explicitly unshipped, rather than inventing data to match a fixed slot count.
   strategies?: NamedStrategy[];
+  sophisticatedPosition?: SophisticatedPosition;
+  dynamicFeePool?: DynamicFeePool;
 }
 
 export async function loadDeployment(): Promise<Deployment> {

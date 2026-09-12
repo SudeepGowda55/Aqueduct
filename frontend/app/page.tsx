@@ -6,11 +6,13 @@ import { BaselineComparisonPanel } from "@/components/BaselineComparisonPanel";
 import { ConnectWallet } from "@/components/ConnectWallet";
 import { CrossVenueProofPanel } from "@/components/CrossVenueProofPanel";
 import { DeploymentAddresses, DeploymentStatus } from "@/components/DeploymentStatus";
+import { DynamicFeePoolPanel } from "@/components/DynamicFeePoolPanel";
 import { EmergencyPausePanel } from "@/components/EmergencyPausePanel";
 import { ExposureGauge } from "@/components/ExposureGauge";
 import { GraphExposurePanel } from "@/components/GraphExposurePanel";
 import { KeeperPanel } from "@/components/KeeperPanel";
 import { RiskPolicyPanel } from "@/components/RiskPolicyPanel";
+import { SophisticatedPositionPanel } from "@/components/SophisticatedPositionPanel";
 import { SwapVMPanel } from "@/components/SwapVMPanel";
 import { UniswapPanel } from "@/components/UniswapPanel";
 import { ActivityLogProvider } from "@/lib/ActivityLogProvider";
@@ -53,6 +55,11 @@ export default function Home() {
               <div className="grid gap-6 md:grid-cols-2">
                 <SwapVMPanel />
                 <UniswapPanel />
+              </div>
+
+              <div className="grid gap-6 md:grid-cols-2">
+                <SophisticatedPositionPanel />
+                <DynamicFeePoolPanel />
               </div>
 
               <BaselineComparisonPanel />

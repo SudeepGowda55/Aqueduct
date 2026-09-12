@@ -30,6 +30,7 @@ import { ExposureAquaOpcodes } from "../src/opcodes/ExposureAquaOpcodes.sol";
 import { ExposureGate, ExposureGateArgsBuilder } from "../src/opcodes/ExposureGate.sol";
 import { ExposureOracle } from "../src/oracle/ExposureOracle.sol";
 import { AquaV4Hook } from "../src/hooks/AquaV4Hook.sol";
+import { AsyncLiquidityHook } from "../src/hooks/AsyncLiquidityHook.sol";
 
 /// @title AquaV4HookTest
 /// @notice Proves AquaV4Hook actually sources a real Uniswap v4 swap from a real Aqua-backed
@@ -104,11 +105,11 @@ contract AquaV4HookTest is Test, ExposureAquaOpcodes {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, aqua, swapVM, order);
+        bytes memory constructorArgs = abi.encode(poolManager, aqua, swapVM, oracle, order);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(AquaV4Hook).creationCode, constructorArgs);
 
-        hook = new AquaV4Hook{ salt: salt }(poolManager, aqua, swapVM, order);
+        hook = new AquaV4Hook{ salt: salt }(poolManager, aqua, swapVM, oracle, order);
         assertEq(address(hook), hookAddress, "hook address mismatch");
 
         poolKey = PoolKey({
@@ -252,10 +253,10 @@ contract AquaV4HookTest is Test, ExposureAquaOpcodes {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, aqua, swapVM, staleOrder);
+        bytes memory constructorArgs = abi.encode(poolManager, aqua, swapVM, oracle, staleOrder);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(AquaV4Hook).creationCode, constructorArgs);
-        AquaV4Hook staleHook = new AquaV4Hook{ salt: salt }(poolManager, aqua, swapVM, staleOrder);
+        AquaV4Hook staleHook = new AquaV4Hook{ salt: salt }(poolManager, aqua, swapVM, oracle, staleOrder);
         assertEq(address(staleHook), hookAddress, "hook address mismatch");
 
         PoolKey memory stalePoolKey = PoolKey({
@@ -305,7 +306,7 @@ contract AquaV4HookTest is Test, ExposureAquaOpcodes {
 
     function test_ExactOutputReverts() public {
         vm.expectRevert(
-            _wrappedRevert(IHooks.beforeSwap.selector, abi.encodeWithSelector(AquaV4Hook.ExactOutputNotSupported.selector))
+            _wrappedRevert(IHooks.beforeSwap.selector, abi.encodeWithSelector(AsyncLiquidityHook.ExactOutputNotSupported.selector))
         );
         swapRouter.swap(
             poolKey,
@@ -321,7 +322,7 @@ contract AquaV4HookTest is Test, ExposureAquaOpcodes {
         token1.approve(address(liquidityRouter), type(uint256).max);
 
         vm.expectRevert(
-            _wrappedRevert(IHooks.beforeAddLiquidity.selector, abi.encodeWithSelector(AquaV4Hook.LiquidityNotAllowed.selector))
+            _wrappedRevert(IHooks.beforeAddLiquidity.selector, abi.encodeWithSelector(AsyncLiquidityHook.LiquidityNotAllowed.selector))
         );
         liquidityRouter.modifyLiquidity(
             poolKey,

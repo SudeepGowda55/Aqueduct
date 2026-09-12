@@ -102,10 +102,10 @@ contract CrossVenueConsistencyTest is Test, ExposureAquaOpcodes {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, aqua, swapVM, orderV4);
+        bytes memory constructorArgs = abi.encode(poolManager, aqua, swapVM, oracle, orderV4);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(AquaV4Hook).creationCode, constructorArgs);
-        hook = new AquaV4Hook{ salt: salt }(poolManager, aqua, swapVM, orderV4);
+        hook = new AquaV4Hook{ salt: salt }(poolManager, aqua, swapVM, oracle, orderV4);
         assertEq(address(hook), hookAddress, "hook address mismatch");
         // The equality isn't just "two implementations that happen to agree" -- the hook's
         // beforeSwap literally calls into THIS SAME `ExposureAwareAquaRouter` instance the direct

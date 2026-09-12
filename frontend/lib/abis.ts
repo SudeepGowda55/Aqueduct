@@ -35,3 +35,22 @@ export const AQUA_ABI = [
 export const POOL_SWAP_TEST_ABI = [
   "function swap((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, (bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96) params, (bool takeClaims, bool settleUsingBurn) testSettings, bytes hookData) payable returns (int256 delta)",
 ];
+
+// Only the pieces DynamicFeePoolPanel needs from AquaV4Hook itself.
+export const AQUA_V4_HOOK_ABI = [
+  "function refreshFee()",
+  "function oracle() view returns (address)",
+];
+
+// `extsload` is how any external caller (this frontend included, no special access needed) reads
+// PoolManager's raw storage -- see StateLibrary.getSlot0, which this project's own scripts already
+// use for the same read. Decoded client-side in lib/dynamicFee.ts rather than re-deploying a
+// getSlot0 helper contract.
+export const POOL_MANAGER_ABI = ["function extsload(bytes32 slot) view returns (bytes32)"];
+
+// A Chainlink-style feed (see lib/swap-vm's IPriceOracle) -- used only to show the live price
+// Strategy P's OraclePriceAdjuster instruction is actually reading, for context in the UI.
+export const PRICE_ORACLE_ABI = [
+  "function decimals() view returns (uint8)",
+  "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
+];

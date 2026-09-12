@@ -20,6 +20,7 @@ import { HookMiner } from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 
 import { ExposureAwareAquaRouter } from "../src/routers/ExposureAwareAquaRouter.sol";
 import { AquaV4Hook } from "../src/hooks/AquaV4Hook.sol";
+import { IExposureOracle } from "../src/oracle/IExposureOracle.sol";
 
 /**
  * @title AqueductV4Demo
@@ -90,11 +91,15 @@ contract AqueductV4Demo is Script {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, aqua, swapVM, order);
+        // No exposure oracle in this pre-ExposureGate demo script -- the order carries no gate
+        // instruction, so `AquaV4Hook`'s dynamic-fee logic (gated on the pool's own static `fee: 0`
+        // below) never touches the oracle; a null address is safe and inert here.
+        IExposureOracle noOracle = IExposureOracle(address(0));
+        bytes memory constructorArgs = abi.encode(poolManager, aqua, swapVM, noOracle, order);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(CREATE2_DEPLOYER, flags, type(AquaV4Hook).creationCode, constructorArgs);
 
-        AquaV4Hook hook = new AquaV4Hook{ salt: salt }(poolManager, aqua, swapVM, order);
+        AquaV4Hook hook = new AquaV4Hook{ salt: salt }(poolManager, aqua, swapVM, noOracle, order);
         require(address(hook) == hookAddress, "hook address mismatch");
 
         PoolKey memory poolKey = PoolKey({

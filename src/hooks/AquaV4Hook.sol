@@ -4,21 +4,9 @@ pragma solidity 0.8.30;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { IUnlockCallback } from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
-import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import { SwapParams, ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {
-    BeforeSwapDelta,
-    BeforeSwapDeltaLibrary,
-    toBeforeSwapDelta
-} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
-
-import { BaseHook } from "uniswap-hooks/src/base/BaseHook.sol";
-import { CurrencySettler } from "uniswap-hooks/src/utils/CurrencySettler.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { LPFeeLibrary } from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 
 import { IAqua } from "@1inch/aqua/src/interfaces/IAqua.sol";
 import { ISwapVM } from "@1inch/swap-vm/src/interfaces/ISwapVM.sol";
@@ -26,62 +14,56 @@ import { SwapVM } from "@1inch/swap-vm/src/SwapVM.sol";
 import { ITakerCallbacks } from "@1inch/swap-vm/src/interfaces/ITakerCallbacks.sol";
 import { TakerTraitsLib } from "@1inch/swap-vm/src/libs/TakerTraits.sol";
 
+import { IExposureOracle } from "../oracle/IExposureOracle.sol";
+import { AsyncLiquidityHook } from "./AsyncLiquidityHook.sol";
+
 /**
  * @title AquaV4Hook
  * @notice A Uniswap v4 hook whose swaps are entirely filled by JIT liquidity sourced from a
  *         single maker's Aqua-backed SwapVM strategy, instead of from the pool's own
  *         concentrated-liquidity curve.
  *
- * @dev The pool this hook is attached to carries NO liquidity of its own -- direct add/remove
- *      liquidity is disabled (see {_beforeAddLiquidity}/{_beforeRemoveLiquidity}), and the
- *      `_beforeSwap` implementation fully overrides the swap via `beforeSwapReturnDelta`, so the
- *      core v3-style AMM math in `PoolManager` never actually executes (the amount fed to it is
- *      always netted to zero). All pricing and execution comes from the maker's SwapVM program.
+ * @dev This is the Aqua-specific `_fillFromExternalLiquidity` implementation on top of
+ *      {AsyncLiquidityHook} -- see that contract's own doc comment for the general v4
+ *      flash-accounting problem it solves (a swapper's payment isn't credited to the pool's real
+ *      reserves until *after* `PoolManager.swap()` returns, so a hook that wants to hand back
+ *      externally-sourced output synchronously has to front it from its own working-capital float,
+ *      not the not-yet-arrived payment) and the reusable claims-mint / float-fund / settle / sweep
+ *      pattern that solves it, independent of what "external liquidity" means.
  *
- *      Critically, this hook cannot bypass the maker's own safety rules: `Aqua.pull` is only
- *      callable by the exact `app` address the maker registered when they shipped their strategy
- *      (see `Aqua.sol`, keyed as `_balances[maker][msg.sender][strategyHash][token]`), so the ONLY
- *      way to draw funds out of the maker's Aqua position is to execute a real swap through
- *      `swapVM.swap(...)`. That means every fill this hook sources runs through the maker's full
- *      SwapVM program, including any exposure-gating instruction (e.g. `_exposureGate1D`) the
- *      maker composed into it. If the maker is too exposed, `swapVM.swap` reverts, and the entire
- *      Uniswap swap reverts with it -- the safety guarantee is enforced at the Aqua layer itself,
- *      not merely by convention in this hook.
+ *      Here, "external liquidity" specifically means: a real Aqua maker strategy, executed through
+ *      that maker's own SwapVM program. Critically, this hook cannot bypass the maker's own safety
+ *      rules while doing so: `Aqua.pull` is only callable by the exact `app` address the maker
+ *      registered when they shipped their strategy (see `Aqua.sol`, keyed as
+ *      `_balances[maker][msg.sender][strategyHash][token]`), so the ONLY way to draw funds out of
+ *      the maker's Aqua position is to execute a real swap through `swapVM.swap(...)`. That means
+ *      every fill this hook sources runs through the maker's full SwapVM program, including any
+ *      exposure-gating instruction (e.g. `_exposureGate1D`) the maker composed into it. If the
+ *      maker is too exposed, `swapVM.swap` reverts, and the entire Uniswap swap reverts with it --
+ *      the safety guarantee is enforced at the Aqua layer itself, not merely by convention here.
  *
- *      WORKING-CAPITAL FLOAT: `PoolManager`'s flash accounting only credits a swapper's actual
- *      payment to the pool's real reserves *after* `PoolManager.swap()` returns to the top-level
- *      router (see `PoolSwapTest.unlockCallback`, which settles deltas only once `manager.swap()`
- *      is done) -- so a real, non-claim `take()` of the swapper's input inside `_beforeSwap` would
- *      revert, since the manager is not holding it yet. This hook therefore funds the Aqua-side
- *      leg from its own small working-capital balance (seeded by a plain ERC20 transfer to this
- *      contract's address -- no bespoke deposit function needed) rather than from the swapper's
- *      not-yet-arrived payment, and instead mints itself ERC-6909 claim tokens for that amount to
- *      close out its own delta. Those claims are real, redeemable value (backed by the swapper's
- *      payment landing later in the very same transaction) and can be converted back into real
- *      tokens at any time via {sweepClaims}, once the pool's real reserves for that currency have
- *      accumulated enough from past swaps -- replenishing the float for future swaps.
+ *      Scope limitations inherited from {AsyncLiquidityHook} (hackathon-grade, documented rather
+ *      than silently handled): exactly one pool key and one maker `Order` per hook instance, and
+ *      only exact-input swaps are filled (exact-output reverts outright, since there is no pool
+ *      liquidity for `PoolManager` to fall back on).
  *
- *      Scope limitations (hackathon-grade, documented rather than silently handled):
- *        - Exactly one pool key and one maker `Order` per hook instance (mirrors the single-pool
- *          binding pattern of OpenZeppelin's `ReHypothecationHook`).
- *        - Only exact-input swaps are filled via Aqua; exact-output swaps revert outright, since
- *          there is no pool liquidity for the `PoolManager` to fall back on.
- *        - No automatic float sizing/sweeping: {sweepClaims} must be called by a keeper (or
- *          anyone) once enough real reserves have accumulated; it is a plain, permissionless
- *          maintenance operation, not a security boundary.
+ *      SECOND, INDEPENDENT V4 CAPABILITY: a risk-adjusted dynamic LP fee (see {_applyFee} and
+ *      {refreshFee} below), on top of the {AsyncLiquidityHook} base's `beforeSwapReturnDelta`
+ *      pricing override. Pools bound to this hook with a *static* fee (e.g. `fee: 0`, as used by
+ *      the pool proven bit-for-bit identical to the direct SwapVM path in
+ *      `test/CrossVenueConsistency.t.sol`) are completely unaffected -- the fee logic is a no-op
+ *      unless the pool key was initialized with `LPFeeLibrary.DYNAMIC_FEE_FLAG`. A *dynamic-fee*
+ *      pool bound to this same hook code gets a swap fee that scales with the same maker's live
+ *      `ExposureOracle` reading -- the identical real-time risk data that already drives the
+ *      SwapVM-side `_exposureGate1D` derate/halt, now also expressed through Uniswap's own native
+ *      dynamic-fee mechanism. The pattern mirrors OpenZeppelin's `uniswap-hooks` `BaseOverrideFee`
+ *      (per-swap fee via the `beforeSwap` return value's `OVERRIDE_FEE_FLAG`) and `BaseDynamicFee`
+ *      (`_poke`-style external refresh) -- adapted, not inherited, because this hook's `beforeSwap`
+ *      already returns a real `BeforeSwapDelta` from the base contract above.
  */
-contract AquaV4Hook is BaseHook, ITakerCallbacks, IUnlockCallback {
-    using CurrencySettler for Currency;
-    using SafeCast for uint256;
+contract AquaV4Hook is AsyncLiquidityHook, ITakerCallbacks {
+    using LPFeeLibrary for uint24;
 
-    /// @dev Thrown when an exact-output swap is attempted; only exact-input is supported.
-    error ExactOutputNotSupported();
-    /// @dev Thrown when a third party attempts to add or remove liquidity directly on the pool.
-    error LiquidityNotAllowed();
-    /// @dev Thrown when the pool has already been bound to this hook's maker order.
-    error AlreadyBound();
-    /// @dev Thrown when a swap is attempted before the pool has been initialized.
-    error NotBound();
     /// @dev Thrown when a caller other than `swapVM` invokes a taker callback.
     error NotSwapVM();
 
@@ -89,18 +71,27 @@ contract AquaV4Hook is BaseHook, ITakerCallbacks, IUnlockCallback {
     IAqua public immutable aqua;
     /// @notice The (possibly exposure-gated) SwapVM router the maker's strategy was shipped to.
     SwapVM public immutable swapVM;
+    /// @notice The same live exposure feed the maker's own `_exposureGate1D` instruction reads --
+    /// read here too so this pool's dynamic fee (if enabled) tracks the identical risk signal.
+    IExposureOracle public immutable oracle;
 
-    /// @dev The single pool this hook is bound to, set once at `_beforeInitialize`.
-    PoolKey private _poolKey;
     /// @dev The maker's SwapVM order backing this pool's liquidity.
     ISwapVM.Order private _order;
-    bool private _bound;
 
-    constructor(IPoolManager poolManager_, IAqua aqua_, SwapVM swapVM_, ISwapVM.Order memory order_)
-        BaseHook(poolManager_)
+    /// @dev Risk-adjusted fee curve, in v4's hundredths-of-a-bip units (`LPFeeLibrary.MAX_LP_FEE`
+    /// == 1_000_000 == 100%): 5 bps when the maker is unexposed, scaling linearly to 100 bps as
+    /// exposure approaches `FEE_SATURATION_BPS` -- deliberately the same 90% halt line
+    /// `_exposureGate1D` uses, so both mechanisms saturate together.
+    uint24 internal constant MIN_FEE_PIPS = 500;
+    uint24 internal constant MAX_FEE_PIPS = 10_000;
+    uint16 internal constant FEE_SATURATION_BPS = 9_000;
+
+    constructor(IPoolManager poolManager_, IAqua aqua_, SwapVM swapVM_, IExposureOracle oracle_, ISwapVM.Order memory order_)
+        AsyncLiquidityHook(poolManager_)
     {
         aqua = aqua_;
         swapVM = swapVM_;
+        oracle = oracle_;
         _order = order_;
     }
 
@@ -109,105 +100,56 @@ contract AquaV4Hook is BaseHook, ITakerCallbacks, IUnlockCallback {
         _;
     }
 
-    /// @notice Returns the pool key this hook is bound to.
-    function getPoolKey() external view returns (PoolKey memory) {
-        return _poolKey;
-    }
-
     /**
-     * @dev Binds the hook to the first pool key it sees. As with `ReHypothecationHook`, pool
-     * initialization is permissionless, so this should be triggered atomically with the hook's
-     * own deployment (e.g. via a single script/multicall) to avoid front-running with an
-     * unintended pool key.
+     * @dev Executes a real swap against the maker's strategy via `swapVM.swap`, funding the input
+     *      leg from this hook's own working-capital float (the base contract already minted this
+     *      hook claims for `specifiedAmount` before calling this) -- this is the only step that can
+     *      move funds in or out of the maker's Aqua balance, and the only step the exposure gate
+     *      (or any other instruction in the maker's program) gets a chance to run. The base
+     *      contract settles the returned `amountOut` to `PoolManager` on the taker's behalf.
      */
-    function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
-        if (_bound) revert AlreadyBound();
-        _poolKey = key;
-        _bound = true;
-        return this.beforeInitialize.selector;
-    }
-
-    /// @dev The hook is the pool's sole source of liquidity; third-party LPing is disabled.
-    function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        internal
-        pure
-        override
-        returns (bytes4)
-    {
-        revert LiquidityNotAllowed();
-    }
-
-    /// @dev See {_beforeAddLiquidity}.
-    function _beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        internal
-        pure
-        override
-        returns (bytes4)
-    {
-        revert LiquidityNotAllowed();
-    }
-
-    /**
-     * @dev Fully sources an exact-input swap from the maker's Aqua-backed SwapVM strategy:
-     *      1. Mints this hook ERC-6909 claim tokens for the taker's specified input amount,
-     *         closing out the credit this function's return value declares for that currency (see
-     *         the contract-level comment on why a *real* take() is not possible here).
-     *      2. Executes a real swap against the maker's strategy via `swapVM.swap`, funding the
-     *         input leg from this hook's own working-capital balance (not the freshly-minted
-     *         claims, which are not real tokens) -- this is the only step that can move funds in
-     *         or out of the maker's Aqua balance, and the only step the exposure gate (or any
-     *         other instruction in the maker's program) gets a chance to run.
-     *      3. Pays the Aqua-sourced output to the `PoolManager` on the taker's behalf.
-     *      4. Returns a `BeforeSwapDelta` that nets the specified amount to zero (so the core v3
-     *         math never runs) and credits the taker with the unspecified amount, so the overall
-     *         swap settles atomically in this same transaction -- see the contract-level comment
-     *         for why this is safe against the `PoolManager`'s own delta accounting.
-     */
-    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
+    function _fillFromExternalLiquidity(Currency specified, Currency unspecified, uint256 specifiedAmount)
         internal
         override
-        returns (bytes4, BeforeSwapDelta, uint24)
+        returns (uint256 amountOut)
     {
-        if (!_bound) revert NotBound();
-        require(params.amountSpecified < 0, ExactOutputNotSupported());
-
-        Currency specified = params.zeroForOne ? key.currency0 : key.currency1;
-        Currency unspecified = params.zeroForOne ? key.currency1 : key.currency0;
-        uint256 specifiedAmount = uint256(-params.amountSpecified);
-
-        specified.take(poolManager, address(this), specifiedAmount, true);
-
-        (, uint256 amountOut,) = swapVM.swap(
+        (, amountOut,) = swapVM.swap(
             _order, Currency.unwrap(specified), Currency.unwrap(unspecified), specifiedAmount, _buildTakerData()
         );
+    }
 
-        unspecified.settle(poolManager, address(this), amountOut, false);
+    /// @dev Linear risk curve: `MIN_FEE_PIPS` at 0% exposure, `MAX_FEE_PIPS` once exposure reaches
+    /// (or exceeds) `FEE_SATURATION_BPS`. A swap this function even runs for has already survived
+    /// `_exposureGate1D`'s own halt check inside `_fillFromExternalLiquidity`, so exposure here is
+    /// always below the hard halt -- this curve is purely about pricing risk, not gating it.
+    function _riskFeePips() internal view returns (uint24) {
+        (uint64 exposureBps,) = oracle.exposureOf(_order.maker);
+        uint256 capped = exposureBps > FEE_SATURATION_BPS ? FEE_SATURATION_BPS : exposureBps;
+        return uint24(MIN_FEE_PIPS + (uint256(MAX_FEE_PIPS - MIN_FEE_PIPS) * capped) / FEE_SATURATION_BPS);
+    }
 
-        return (
-            this.beforeSwap.selector,
-            toBeforeSwapDelta(specifiedAmount.toInt128(), -amountOut.toInt128()),
-            0
-        );
+    /// @dev No-op for any pool bound to this hook with a static fee -- only pools deliberately
+    /// initialized with `LPFeeLibrary.DYNAMIC_FEE_FLAG` get a risk-adjusted fee. The deducted
+    /// amount simply stays in this hook's own float (the maker is this pool's sole liquidity
+    /// source, so that is exactly where an LP fee should accrue).
+    function _applyFee(PoolKey calldata key, uint256 amountOut) internal override returns (uint256, uint24) {
+        if (!key.fee.isDynamicFee()) return (amountOut, 0);
+        uint24 feePips = _riskFeePips();
+        uint256 fee = (amountOut * feePips) / LPFeeLibrary.MAX_LP_FEE;
+        return (amountOut - fee, feePips | LPFeeLibrary.OVERRIDE_FEE_FLAG);
     }
 
     /**
-     * @notice Converts this hook's accumulated ERC-6909 claim balance for `currency` back into
-     *         real tokens, replenishing the working-capital float that funds future swaps.
-     * @dev Permissionless and callable by anyone (e.g. a keeper) at any time; it simply reverts
-     *      if the `PoolManager`'s real reserves for `currency` (accumulated from past swappers'
-     *      settled payments) can't yet cover `amount`. Not a security boundary -- see the
-     *      contract-level comment.
+     * @notice Permissionlessly pushes the current risk-based fee onto this pool's persisted
+     *         `lpFee`, independent of any swap -- so anyone (a keeper, `cast call` + `cast send`,
+     *         a block explorer reading `StateLibrary.getSlot0`) can observe the fee track the
+     *         oracle in real time without needing to execute a fill. Mirrors OpenZeppelin's
+     *         `BaseDynamicFee._poke` pattern. No-op if this pool isn't a dynamic-fee pool.
      */
-    function sweepClaims(Currency currency, uint256 amount) external {
-        poolManager.unlock(abi.encode(currency, amount));
-    }
-
-    /// @inheritdoc IUnlockCallback
-    function unlockCallback(bytes calldata data) external onlyPoolManager returns (bytes memory) {
-        (Currency currency, uint256 amount) = abi.decode(data, (Currency, uint256));
-        poolManager.burn(address(this), currency.toId(), amount);
-        poolManager.take(currency, address(this), amount);
-        return "";
+    function refreshFee() external {
+        if (_bound && _poolKey.fee.isDynamicFee()) {
+            poolManager.updateDynamicLPFee(_poolKey, _riskFeePips());
+        }
     }
 
     /// @inheritdoc ITakerCallbacks
@@ -261,29 +203,5 @@ contract AquaV4Hook is BaseHook, ITakerCallbacks, IUnlockCallback {
             instructionsArgs: "",
             signature: ""
         }));
-    }
-
-    /**
-     * Set the hook permissions: `beforeInitialize` to bind the pool, `beforeAddLiquidity` /
-     * `beforeRemoveLiquidity` to keep this hook the pool's sole liquidity source, and
-     * `beforeSwap` + `beforeSwapReturnDelta` to fully source swaps from Aqua.
-     */
-    function getHookPermissions() public pure override returns (Hooks.Permissions memory permissions) {
-        return Hooks.Permissions({
-            beforeInitialize: true,
-            afterInitialize: false,
-            beforeAddLiquidity: true,
-            afterAddLiquidity: false,
-            beforeRemoveLiquidity: true,
-            afterRemoveLiquidity: false,
-            beforeSwap: true,
-            afterSwap: false,
-            beforeDonate: false,
-            afterDonate: false,
-            beforeSwapReturnDelta: true,
-            afterSwapReturnDelta: false,
-            afterAddLiquidityReturnDelta: false,
-            afterRemoveLiquidityReturnDelta: false
-        });
     }
 }

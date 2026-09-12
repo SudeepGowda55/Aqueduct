@@ -310,10 +310,10 @@ contract NarrativeDemo is Script, ExposureAquaOpcodes {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
-        bytes memory constructorArgs = abi.encode(IPoolManager(POOL_MANAGER), aqua, swapVM, orderF);
+        bytes memory constructorArgs = abi.encode(IPoolManager(POOL_MANAGER), aqua, swapVM, oracle, orderF);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(CREATE2_DEPLOYER, flags, type(AquaV4Hook).creationCode, constructorArgs);
-        AquaV4Hook matchedHook = new AquaV4Hook{ salt: salt }(IPoolManager(POOL_MANAGER), aqua, swapVM, orderF);
+        AquaV4Hook matchedHook = new AquaV4Hook{ salt: salt }(IPoolManager(POOL_MANAGER), aqua, swapVM, oracle, orderF);
         require(address(matchedHook) == hookAddress, "hook address mismatch");
 
         PoolKey memory matchedPoolKey = PoolKey({
