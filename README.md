@@ -531,8 +531,13 @@ chosen instead as the cheaper second composed product.)
 ## Frontend
 
 A Next.js dashboard (`frontend/`) drives everything above from a browser instead of the terminal —
-no local setup required, since it reads `frontend/public/deployment.json`, which is committed and
-already points at the real Base Sepolia deployment above:
+**no local setup required**: it's hosted at
+[`aqueduct-protocol.vercel.app`](https://aqueduct-protocol.vercel.app/) and reads
+`frontend/public/deployment.json`, which is committed and already points at the real Base Sepolia
+deployment above. Just open that link with a wallet (MetaMask or similar) switched to Base Sepolia
+(chain id `84532`) — get free testnet ETH from a Base Sepolia faucet first if you don't have any.
+
+To run it locally instead (e.g. to hack on it):
 
 ```shell
 cd frontend
@@ -540,8 +545,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000` with a wallet (MetaMask or similar) switched to Base Sepolia (chain
-id `84532`) — get free testnet ETH from a Base Sepolia faucet first if you don't have any. The
+then open `http://localhost:3000` the same way. The
 read-only dashboard data (exposure gauge, keeper panel) uses Base's own public RPC
 (`https://sepolia.base.org`) so it works even before a wallet connects; it never uses a personal
 Alchemy/Infura key client-side, since that file ships to every visitor's browser. It shows:
@@ -577,15 +581,21 @@ Alchemy/Infura key client-side, since that file ships to every visitor's browser
   maker-configurable arguments they actually are (`ExposureGateArgsBuilder.build`), not hackathon
   constants, showing this deployment's chosen thresholds alongside two illustrative alternative
   profiles (`RiskPolicyPanel.tsx`).
+- **A Graph-powered exposure panel** — every number on it comes from the deployed subgraph's
+  GraphQL endpoint, zero RPC calls: a per-strategy exposure table (venues, committed amount,
+  wallet balance, status), which positions fill on both venues, and an exposure-history sparkline
+  from indexed `ExposureSnapshot`s (`GraphExposurePanel.tsx`; see [The Graph
+  pipeline](#the-graph-pipeline) above for the schema behind it).
 - **A maker emergency-halt panel** — the third security layer from the [threat
   model](#threat-model) above, wired to a real signed transaction from the demo maker's own key
   (the same non-secret, derivable-by-anyone pattern the keeper panel below already uses); live on
   this deployment (`EmergencyPausePanel.tsx`). Falls back to an explicit "not live on this
   deployment" state rather than failing silently if pointed at an older `ExposureOracle` that
   predates this function.
-- **A keeper panel** — since there's no live subgraph deployment to drive `ExposureOracle`
-  automatically (see below), this lets you push an exposure reading yourself and immediately feel
-  every panel above react to it.
+- **A keeper panel** — the real subgraph + keeper (see [The Graph pipeline](#the-graph-pipeline)
+  above) can push a live exposure reading, but nothing runs it continuously as a background daemon
+  yet, so this panel lets you push a reading yourself on demand and immediately feel every panel
+  above react to it, exactly like a real keeper run would.
 - **An activity log** with real transaction hashes for everything above.
 
 Three implementation details worth calling out because they took real verification, not
