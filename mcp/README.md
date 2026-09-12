@@ -1,7 +1,7 @@
 # Aqueduct exposure MCP server
 
 A minimal (zero-dependency, stdio JSON-RPC) MCP server that wraps the deployed
-[exposure subgraph](https://api.studio.thegraph.com/query/1758739/ethonline/v0.3.0) as agent
+[exposure subgraph](https://api.studio.thegraph.com/query/1758739/ethonline/v0.4.0) as agent
 tools — so Claude, Cursor, or any other MCP client can answer "is this maker safe on both
 venues?" without anyone hand-writing GraphQL.
 

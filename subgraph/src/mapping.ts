@@ -2,9 +2,10 @@ import { BigInt, BigDecimal, Bytes, Address } from "@graphprotocol/graph-ts";
 import { Shipped, Pushed, Pulled, Docked } from "../generated/Aqua/Aqua";
 import { ExposureUpdated, MakerPauseUpdated } from "../generated/ExposureOracle/ExposureOracle";
 import { Swap as PoolSwapEvent } from "../generated/PoolManager/PoolManager";
+import { Swapped as RouterSwapped } from "../generated/AquaRouterV2/ExposureAwareAquaRouter";
 import { ERC20 } from "../generated/Aqua/ERC20";
 import { ExposureOracle } from "../generated/ExposureOracle/ExposureOracle";
-import { Strategy, StrategyBalance, AquaBalanceEvent, Maker, ExposurePosition, ExposureSnapshot, Token, LiquidityPool, Swap } from "../generated/schema";
+import { Strategy, StrategyBalance, AquaBalanceEvent, Maker, ExposurePosition, ExposureSnapshot, Token, LiquidityPool, Swap, SwapAmounts } from "../generated/schema";
 
 function strategyId(maker: Bytes, app: Bytes, strategyHash: Bytes): string {
   return maker.toHex() + "-" + app.toHex() + "-" + strategyHash.toHex();
@@ -518,6 +519,23 @@ function ensureMessariPool(poolIdHex: string): LiquidityPool {
   return pool as LiquidityPool;
 }
 
+// Router Swapped fires BEFORE the top-level PoolManager.Swap in the same tx
+// (lower logIndex on every receipt checked), so stashing by tx hash here is
+// always visible to handlePoolSwap below during a single sync pass.
+export function handleSwapped(event: RouterSwapped): void {
+  const id = event.transaction.hash.toHexString();
+  let stash = SwapAmounts.load(id);
+  if (stash == null) {
+    stash = new SwapAmounts(id);
+  }
+  const s = stash as SwapAmounts;
+  s.tokenIn = event.params.tokenIn;
+  s.tokenOut = event.params.tokenOut;
+  s.amountIn = event.params.amountIn;
+  s.amountOut = event.params.amountOut;
+  s.save();
+}
+
 // A swap on a whitelisted v4 pool re-asserts the uniswap-v4 venue on the bound
 // position. Pool -> strategy mapping is hardcoded (no factory/discovery
 // events exist); unknown pools are ignored. Maker is the deployment's single
@@ -544,26 +562,38 @@ export function handlePoolSwap(event: PoolSwapEvent): void {
   }
 
   // Messari-shape record for the same event (only whitelisted pools; unknown
-  // pools are ignored exactly like above).
+  // pools are ignored exactly like above). Real amounts come from the
+  // router's Swapped event stashed under this tx hash (PoolManager's own
+  // amount0/amount1 are always zero for this hook); falls back to the
+  // amount0/amount1 direction logic only if no stash exists.
   if (hashHex) {
     const pool = ensureMessariPool(poolIdHex);
     const zero = BigInt.zero();
-    const amount0 = event.params.amount0;
-    const amount1 = event.params.amount1;
     let inAddr: Address;
     let outAddr: Address;
     let inAmt: BigInt;
     let outAmt: BigInt;
-    if (amount0.gt(zero)) {
-      inAddr = TOKEN_IN;
-      outAddr = Address.fromString("0x8bb1a7e6babc09973a67d417120c3e8396c4822f");
-      inAmt = amount0;
-      outAmt = zero.minus(amount1);
+    const stashed = SwapAmounts.load(event.transaction.hash.toHexString());
+    if (stashed) {
+      const st = stashed as SwapAmounts;
+      inAddr = Address.fromBytes(st.tokenIn);
+      outAddr = Address.fromBytes(st.tokenOut);
+      inAmt = st.amountIn;
+      outAmt = st.amountOut;
     } else {
-      inAddr = Address.fromString("0x8bb1a7e6babc09973a67d417120c3e8396c4822f");
-      outAddr = TOKEN_IN;
-      inAmt = amount1;
-      outAmt = zero.minus(amount0);
+      const amount0 = event.params.amount0;
+      const amount1 = event.params.amount1;
+      if (amount0.gt(zero)) {
+        inAddr = TOKEN_IN;
+        outAddr = Address.fromString("0x8bb1a7e6babc09973a67d417120c3e8396c4822f");
+        inAmt = amount0;
+        outAmt = zero.minus(amount1);
+      } else {
+        inAddr = Address.fromString("0x8bb1a7e6babc09973a67d417120c3e8396c4822f");
+        outAddr = TOKEN_IN;
+        inAmt = amount1;
+        outAmt = zero.minus(amount0);
+      }
     }
     const tokenIn = ensureMessariToken(inAddr);
     const tokenOut = ensureMessariToken(outAddr);

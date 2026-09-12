@@ -103,3 +103,47 @@ dataSources:
         - event: Swap(indexed bytes32,indexed address,int128,int128,uint160,uint128,int24,uint24)
           handler: handlePoolSwap
       file: ./src/mapping.ts
+  - kind: ethereum
+    name: AquaRouter
+    network: base-sepolia
+    source:
+      # Original ExposureAwareAquaRouter (script/AqueductDemo.s.sol) — same
+      # Swapped event as V2, so old-pool swaps get real amounts too.
+      address: "0xc008dd3d1293543d5fa7ad6eed285ed45e3d7ccc"
+      abi: ExposureAwareAquaRouter
+      startBlock: 46640687 # router's actual deployment block on Base Sepolia
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - SwapAmounts
+      abis:
+        - name: ExposureAwareAquaRouter
+          file: ./abis/ExposureAwareAquaRouter.json
+      eventHandlers:
+        - event: Swapped(bytes32,address,address,address,address,uint256,uint256)
+          handler: handleSwapped
+      file: ./src/mapping.ts
+  - kind: ethereum
+    name: AquaRouterV2
+    network: base-sepolia
+    source:
+      # Fixed router (script/AqueductV2Redeploy.s.sol) — maker-pause check
+      # compiled in; backs the new Strategy A pools.
+      address: "0x00449DD6DCD06327d0ae98f013CfFb7426658B21"
+      abi: ExposureAwareAquaRouter
+      startBlock: 46720304 # router's actual deployment block on Base Sepolia
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - SwapAmounts
+      abis:
+        - name: ExposureAwareAquaRouter
+          file: ./abis/ExposureAwareAquaRouter.json
+      eventHandlers:
+        - event: Swapped(bytes32,address,address,address,address,uint256,uint256)
+          handler: handleSwapped
+      file: ./src/mapping.ts

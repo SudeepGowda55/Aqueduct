@@ -144,3 +144,18 @@ type Swap @entity(immutable: true) {
   from: String! # Swap sender (v4 Swap carries no recipient field; to == from)
   to: String!
 }
+
+# Internal bridge: router Swapped amounts keyed by tx hash, so the
+# PoolManager.Swap handler (which fires later in the same tx — Swapped
+# logIndex < Swap logIndex on every receipt checked) can populate the Messari
+# Swap with the real amounts. PoolManager's own amount0/amount1 are always
+# zero for this hook (it sources liquidity externally, not from pool
+# reserves), so without this the Messari layer would show 0/0 everywhere.
+# Not for display.
+type SwapAmounts @entity(immutable: false) {
+  id: ID! # tx hash hex
+  tokenIn: Bytes!
+  tokenOut: Bytes!
+  amountIn: BigInt!
+  amountOut: BigInt!
+}

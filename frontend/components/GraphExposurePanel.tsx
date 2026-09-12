@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { useDeployment } from "@/lib/DeploymentProvider";
 
 // Everything on this panel comes from the deployed subgraph
-// (Subgraph Studio `ethonline` v0.3.0) -- not from RPC reads. The subgraph
+// (Subgraph Studio `ethonline` v0.4.0) -- not from RPC reads. The subgraph
 // joins Aqua commitments, ExposureOracle readings and v4 swaps into one
 // ExposurePosition per (maker, strategy), so this is a single GraphQL query,
 // not N contract calls.
-const SUBGRAPH_URL = "https://api.studio.thegraph.com/query/1758739/ethonline/v0.3.0";
+const SUBGRAPH_URL = "https://api.studio.thegraph.com/query/1758739/ethonline/v0.4.0";
 
 interface PositionRow {
   strategyHash: string;

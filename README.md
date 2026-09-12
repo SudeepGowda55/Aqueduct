@@ -135,8 +135,8 @@ frontend.
 | Strategy P — price + risk aware position (see below) | strategy hash `0xe3f9f24ede56f811c1201b8811f731d7d0f91b8bd2aea824b272ad201c0bcd88` |
 
 Live off-chain links: dashboard [`aqueduct-protocol.vercel.app`](https://aqueduct-protocol.vercel.app/) ·
-subgraph on [Subgraph Studio (`ethonline`, v0.3.0)](https://thegraph.com/studio/subgraph/ethonline) ·
-[query endpoint](https://api.studio.thegraph.com/query/1758739/ethonline/v0.3.0).
+subgraph on [Subgraph Studio (`ethonline`, v0.4.0)](https://thegraph.com/studio/subgraph/ethonline) ·
+[query endpoint](https://api.studio.thegraph.com/query/1758739/ethonline/v0.4.0).
 
 ### A real bug found during live testing, and how it was actually fixed
 
@@ -635,8 +635,8 @@ immediately undoing it, so the live strategy was never left stuck halted for the
 Both pieces are complete, real code — the subgraph compiles cleanly to WASM via `graph build`
 (`cd subgraph && npm install && npm run codegen && npx graph build`), and the keeper type-checks
 cleanly (`cd keeper && npm install && npx tsc --noEmit`). Both are also **live**: the subgraph is
-deployed to [Subgraph Studio as `ethonline`](https://thegraph.com/studio/subgraph/ethonline) (v0.3.0, Base Sepolia — query it in the Studio
-Playground or at `https://api.studio.thegraph.com/query/1758739/ethonline/v0.3.0`), and the keeper
+deployed to [Subgraph Studio as `ethonline`](https://thegraph.com/studio/subgraph/ethonline) (v0.4.0, Base Sepolia — query it in the Studio
+Playground or at `https://api.studio.thegraph.com/query/1758739/ethonline/v0.4.0`), and the keeper
 has run for real against it (pushed exposure for maker `0x5067…`, [tx mined on Base Sepolia](https://sepolia.basescan.org/tx/0x19550d3f6e2162f901f39eab8d00657aab6eae6e0ce5111907898625441b9cac);
 re-run any time with `SUBGRAPH_URL=… RPC_URL=… ORACLE_ADDRESS=… KEEPER_PRIVATE_KEY=… npm start`
 from `keeper/`).
