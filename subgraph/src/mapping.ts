@@ -1,10 +1,10 @@
-import { BigInt, Bytes, Address } from "@graphprotocol/graph-ts";
+import { BigInt, BigDecimal, Bytes, Address } from "@graphprotocol/graph-ts";
 import { Shipped, Pushed, Pulled, Docked } from "../generated/Aqua/Aqua";
 import { ExposureUpdated, MakerPauseUpdated } from "../generated/ExposureOracle/ExposureOracle";
-import { Swap } from "../generated/PoolManager/PoolManager";
+import { Swap as PoolSwapEvent } from "../generated/PoolManager/PoolManager";
 import { ERC20 } from "../generated/Aqua/ERC20";
 import { ExposureOracle } from "../generated/ExposureOracle/ExposureOracle";
-import { Strategy, StrategyBalance, AquaBalanceEvent, Maker, ExposurePosition, ExposureSnapshot } from "../generated/schema";
+import { Strategy, StrategyBalance, AquaBalanceEvent, Maker, ExposurePosition, ExposureSnapshot, Token, LiquidityPool, Swap } from "../generated/schema";
 
 function strategyId(maker: Bytes, app: Bytes, strategyHash: Bytes): string {
   return maker.toHex() + "-" + app.toHex() + "-" + strategyHash.toHex();
@@ -451,12 +451,80 @@ export function handleMakerPauseUpdated(event: MakerPauseUpdated): void {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Trimmed Messari DEX-AMM layer: same names as messari/subgraphs
+// `schema-dex-amm.graphql` (Token, LiquidityPool, Swap) so the standard query
+// pattern works here too. Both live pools share one pair:
+// currency0 = TOKEN_IN, currency1 = TOKEN_OUT (see deployment.json poolKey).
+// v4 Swap gives signed amount0/amount1: positive = user paid in, negative =
+// pool paid out. USD fields stay zero (no price feed on Base Sepolia).
+// ---------------------------------------------------------------------------
+
+function ensureMessariToken(tokenAddr: Address): Token {
+  const id = tokenAddr.toHexString();
+  let token = Token.load(id);
+  if (token == null) {
+    token = new Token(id);
+    const erc20 = ERC20.bind(tokenAddr);
+    const symCall = erc20.try_symbol();
+    if (!symCall.reverted) {
+      token.symbol = symCall.value;
+    } else {
+      token.symbol = "TKN";
+    }
+    const nameCall = erc20.try_name();
+    if (!nameCall.reverted) {
+      token.name = nameCall.value;
+    } else {
+      token.name = "Aqueduct Mock Token";
+    }
+    const decCall = erc20.try_decimals();
+    if (!decCall.reverted) {
+      token.decimals = decCall.value;
+    } else {
+      token.decimals = 18;
+    }
+    token.save();
+  }
+  return token as Token;
+}
+
+function poolLabel(poolIdHex: string): string {
+  if (poolIdHex == "0x54e7faa821dfc1832bcf0f16aa0e8545c5f142e9a9c6e9962b05f2dec3948b76") {
+    return "Aqueduct Strategy A / static-fee";
+  }
+  if (poolIdHex == "0x7bf07bfabe7eb1773eb3be5a319ddbaa59db133427d56e0508ad6c42958d047a") {
+    return "Aqueduct Strategy A / dynamic-fee";
+  }
+  if (poolIdHex == "0xeadf84808fa273e1837ebbfa022259d7e687c42f23fbea74bac849532b8ff8f8") {
+    return "Aqueduct Strategy A / static-fee (old router)";
+  }
+  return "Aqueduct Strategy F / static-fee";
+}
+
+function ensureMessariPool(poolIdHex: string): LiquidityPool {
+  let pool = LiquidityPool.load(poolIdHex);
+  if (pool == null) {
+    pool = new LiquidityPool(poolIdHex);
+    const label = poolLabel(poolIdHex);
+    pool.name = label;
+    pool.symbol = label;
+    const t0 = ensureMessariToken(TOKEN_IN);
+    const t1 = ensureMessariToken(Address.fromString("0x8bb1a7e6babc09973a67d417120c3e8396c4822f"));
+    pool.inputTokens = [t0.id, t1.id];
+    pool.cumulativeVolumeUSD = BigDecimal.zero();
+    pool.save();
+  }
+  return pool as LiquidityPool;
+}
+
 // A swap on a whitelisted v4 pool re-asserts the uniswap-v4 venue on the bound
 // position. Pool -> strategy mapping is hardcoded (no factory/discovery
 // events exist); unknown pools are ignored. Maker is the deployment's single
 // maker -- bare Swap events carry no maker field.
-export function handlePoolSwap(event: Swap): void {
-  const hashHex = strategyForPool(event.params.id.toHexString());
+export function handlePoolSwap(event: PoolSwapEvent): void {
+  const poolIdHex = event.params.id.toHexString();
+  const hashHex = strategyForPool(poolIdHex);
   if (hashHex) {
     const pos = ensurePosition(MAKER, null, Bytes.fromHexString(hashHex), event.block.timestamp);
     const venues = pos.venues;
@@ -473,5 +541,46 @@ export function handlePoolSwap(event: Swap): void {
     }
     pos.updatedAt = event.block.timestamp;
     pos.save();
+  }
+
+  // Messari-shape record for the same event (only whitelisted pools; unknown
+  // pools are ignored exactly like above).
+  if (hashHex) {
+    const pool = ensureMessariPool(poolIdHex);
+    const zero = BigInt.zero();
+    const amount0 = event.params.amount0;
+    const amount1 = event.params.amount1;
+    let inAddr: Address;
+    let outAddr: Address;
+    let inAmt: BigInt;
+    let outAmt: BigInt;
+    if (amount0.gt(zero)) {
+      inAddr = TOKEN_IN;
+      outAddr = Address.fromString("0x8bb1a7e6babc09973a67d417120c3e8396c4822f");
+      inAmt = amount0;
+      outAmt = zero.minus(amount1);
+    } else {
+      inAddr = Address.fromString("0x8bb1a7e6babc09973a67d417120c3e8396c4822f");
+      outAddr = TOKEN_IN;
+      inAmt = amount1;
+      outAmt = zero.minus(amount0);
+    }
+    const tokenIn = ensureMessariToken(inAddr);
+    const tokenOut = ensureMessariToken(outAddr);
+    const swap = new Swap(event.transaction.hash.toHexString() + "-" + event.logIndex.toString());
+    swap.hash = event.transaction.hash.toHexString();
+    swap.logIndex = event.logIndex.toI32();
+    swap.pool = pool.id;
+    swap.tokenIn = tokenIn.id;
+    swap.amountIn = inAmt;
+    swap.amountInUSD = BigDecimal.zero();
+    swap.tokenOut = tokenOut.id;
+    swap.amountOut = outAmt;
+    swap.amountOutUSD = BigDecimal.zero();
+    swap.blockNumber = event.block.number;
+    swap.timestamp = event.block.timestamp;
+    swap.from = event.params.sender.toHexString();
+    swap.to = event.params.sender.toHexString();
+    swap.save();
   }
 }

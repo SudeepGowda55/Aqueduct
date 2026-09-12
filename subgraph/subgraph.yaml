@@ -91,9 +91,14 @@ dataSources:
       language: wasm/assemblyscript
       entities:
         - ExposurePosition
+        - Token
+        - LiquidityPool
+        - Swap
       abis:
         - name: PoolManager
           file: ./abis/PoolManager.json
+        - name: ERC20
+          file: ./abis/ERC20.json
       eventHandlers:
         - event: Swap(indexed bytes32,indexed address,int128,int128,uint160,uint128,int24,uint24)
           handler: handlePoolSwap

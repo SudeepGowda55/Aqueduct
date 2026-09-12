@@ -97,3 +97,50 @@ type ExposureSnapshot @entity(immutable: true) {
   blockNumber: BigInt!
   blockTimestamp: BigInt!
 }
+
+# ---------------------------------------------------------------------------
+# Trimmed Messari DEX-AMM layer (standards-leverage fix).
+#
+# Same entity + field names as messari/subgraphs `schema-dex-amm.graphql`
+# (Token, LiquidityPool, Swap) so the exact query pattern that works against
+# any real Messari-standardized DEX subgraph also returns real results here:
+#   { liquidityPools { inputTokens { symbol } swaps { tokenIn { symbol }
+#     amountIn amountOut } } }
+# Trimmed on purpose: only the fields populate-able from the already-indexed
+# PoolManager.Swap events + live ERC20 metadata, no USD oracle on Sepolia
+# (amountInUSD/amountOutUSD/cumulativeVolumeUSD stay zero, documented not
+# mocked), no Protocol/fees/snapshots. Populated in mapping.ts handlePoolSwap.
+# ---------------------------------------------------------------------------
+
+type Token @entity(immutable: true) {
+  id: ID! # token address hex
+  name: String!
+  symbol: String!
+  decimals: Int!
+}
+
+type LiquidityPool @entity(immutable: false) {
+  id: ID! # v4 poolId hex (keccak256 of pool key)
+  name: String
+  symbol: String
+  inputTokens: [Token!]!
+  swaps: [Swap!]! @derivedFrom(field: "pool")
+  cumulativeVolumeUSD: BigDecimal! # always zero: no USD price feed on Base Sepolia
+}
+
+type Swap @entity(immutable: true) {
+  id: ID! # `${tx.hash.toHex()}-${logIndex}`
+  hash: String!
+  logIndex: Int!
+  pool: LiquidityPool!
+  tokenIn: Token!
+  amountIn: BigInt!
+  amountInUSD: BigDecimal! # always zero: no USD price feed on Base Sepolia
+  tokenOut: Token!
+  amountOut: BigInt!
+  amountOutUSD: BigDecimal! # always zero: no USD price feed on Base Sepolia
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  from: String! # Swap sender (v4 Swap carries no recipient field; to == from)
+  to: String!
+}

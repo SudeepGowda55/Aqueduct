@@ -37,6 +37,17 @@ const TOOLS = [
       properties: { maker: { type: "string", description: "maker address, optional" } },
     },
   },
+  {
+    name: "messari_swaps",
+    description: "Recent swaps in Messari DEX-AMM shape (same field names as messari/subgraphs schema-dex-amm: pool { inputTokens } tokenIn/tokenOut amountIn/amountOut). Proves the standard query pattern works here too. USD fields are zero (no price feed on Base Sepolia).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pool: { type: "string", description: "v4 poolId hex, optional — omit for all pools" },
+        limit: { type: "number", description: "max swaps (default 20)" },
+      },
+    },
+  },
 ];
 
 async function gql(query, variables = {}) {
@@ -81,6 +92,18 @@ async function handleCall(name, args = {}) {
     );
     const rows = data.exposurePositions ?? [];
     return { crossVenue: rows.filter((r) => (r.venues || []).includes("uniswap-v4")) };
+  }
+  if (name === "messari_swaps") {
+    const limit = Math.min(Number(args.limit) || 20, 100);
+    const where = args.pool ? `(where: { pool: "${String(args.pool).toLowerCase()}" }, ` : "(";
+    return await gql(
+      `{ swaps${where}first: ${limit}, orderBy: blockNumber, orderDirection: desc) {
+        id pool { id name inputTokens { id symbol name decimals } }
+        tokenIn { id symbol } amountIn amountInUSD
+        tokenOut { id symbol } amountOut amountOutUSD
+        blockNumber timestamp from to
+      } }`
+    );
   }
   throw new Error(`unknown tool: ${name}`);
 }
