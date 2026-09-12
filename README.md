@@ -1,7 +1,7 @@
 # Aqueduct — Exposure-Gated Aqua Liquidity
 
 Built for ETHGlobal, spanning the **1inch: Build an Aqua App** and **Uniswap Hook** tracks, plus
-**The Graph** for the off-chain data pipeline.
+**The Graph** for the off-chain data pipeline. 
 
 Aqueduct adds a new SwapVM instruction, `_exposureGate1D`, that derates or halts a maker's fill
 based on their *live cross-protocol exposure* — read from an on-chain oracle (`ExposureOracle`)
