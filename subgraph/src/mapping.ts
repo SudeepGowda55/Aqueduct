@@ -262,7 +262,7 @@ function positionId(maker: Bytes, strategyHash: Bytes): Bytes {
 function statusFor(exposure: BigInt, paused: boolean): string {
   if (paused) return "PAUSED";
   if (exposure.ge(HALT_EXPOSURE_BPS)) return "HALTED";
-  if (exposure.ge(MAX_EXPOSURE_BPS)) return "DERATED";
+  if (exposure.gt(MAX_EXPOSURE_BPS)) return "DERATED";
   return "SAFE";
 }
 
