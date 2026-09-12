@@ -48,6 +48,20 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: "liquidity_pools",
+    description: "All indexed v4 pools in Messari shape (name, inputTokens with live symbols, indexed swap counts). Lets an agent discover poolIds before filtering messari_swaps by pool.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "maker_safety_verdict",
+    description: "Reasoned safety verdict for a maker: worst status across positions, exposure vs thresholds, cross-venue coverage, and the latest indexed swap. Answers 'is this maker safe on both venues?' without the caller reasoning over raw rows.",
+    inputSchema: {
+      type: "object",
+      properties: { maker: { type: "string", description: "maker address (0x...)" } },
+      required: ["maker"],
+    },
+  },
 ];
 
 async function gql(query, variables = {}) {
@@ -105,6 +119,71 @@ async function handleCall(name, args = {}) {
       } }`
     );
   }
+  if (name === "liquidity_pools") {
+    const data = await gql(
+      `{ liquidityPools {
+        id name cumulativeVolumeUSD
+        inputTokens { id symbol name decimals }
+      }
+      swapStats: swaps(first: 1000) { pool { id } } }`
+    );
+    const tally = {};
+    for (const s of data.swapStats ?? []) {
+      const pid = s.pool.id;
+      tally[pid] = (tally[pid] || 0) + 1;
+    }
+    return {
+      pools: (data.liquidityPools ?? []).map((p) => ({ ...p, indexedSwaps: tally[p.id] || 0 })),
+    };
+  }
+  if (name === "maker_safety_verdict") {
+    const maker = String(args.maker).toLowerCase();
+    const data = await gql(
+      `{ exposurePositions(where: { maker: "${maker}" }) {
+        strategyHash venues committedAmount makerWalletBalance
+        exposureBps maxExposureBps haltExposureBps status isPausedByMaker updatedAt
+      }
+      swaps(first: 3, orderBy: blockNumber, orderDirection: desc) {
+        pool { id name } tokenIn { symbol } amountIn
+        tokenOut { symbol } amountOut blockNumber timestamp
+      } }`
+    );
+    const rows = data.exposurePositions ?? [];
+    const RANK = { SAFE: 1, DERATED: 2, HALTED: 3, PAUSED: 4 };
+    let worst = "SAFE";
+    let worstRank = 0;
+    let maxExposure = 0;
+    let pausedAny = false;
+    const crossVenue = [];
+    for (const r of rows) {
+      const rank = RANK[r.status] || 0;
+      if (rank > worstRank) {
+        worstRank = rank;
+        worst = r.status;
+      }
+      maxExposure = Math.max(maxExposure, Number(r.exposureBps) || 0);
+      if (r.isPausedByMaker) pausedAny = true;
+      if ((r.venues || []).includes("uniswap-v4")) crossVenue.push(r.strategyHash);
+    }
+    const last = (data.swaps ?? [])[0] || null;
+    const verdict = rows.length === 0 ? "UNKNOWN" : worst;
+    const exposurePct = (maxExposure / 100).toFixed(1);
+    const summary =
+      rows.length === 0
+        ? `UNKNOWN — no positions indexed for ${maker}`
+        : `${verdict} — ${exposurePct}% exposure, ${crossVenue.length}/${rows.length} positions cross-venue` +
+          (pausedAny ? ", maker pause active" : "") +
+          (last ? `, last swap ${last.amountIn} ${last.tokenIn.symbol} -> ${last.amountOut} ${last.tokenOut.symbol}` : ", no swaps indexed");
+    return {
+      verdict,
+      summary,
+      exposureBps: String(maxExposure),
+      positions: rows.length,
+      crossVenue,
+      pausedAny,
+      lastSwap: last,
+    };
+  }
   throw new Error(`unknown tool: ${name}`);
 }
 
@@ -134,7 +213,7 @@ process.stdin.on("data", async (chunk) => {
       if (method === "initialize")
         respond(id, {
           protocolVersion: "2024-11-05",
-          serverInfo: { name: "aqueduct-exposure", version: "1.0.0" },
+          serverInfo: { name: "aqueduct-exposure", version: "1.1.0" },
           capabilities: { tools: {} },
         });
       else if (method === "tools/list") respond(id, { tools: TOOLS });

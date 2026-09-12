@@ -17,6 +17,8 @@ for the full composability story.
 | `exposure_history` | Ordered `ExposureSnapshot` readings over time, for charting 10% → 40% → 70% → 90%. |
 | `cross_venue_positions` | Only the positions that fill on *both* SwapVM and Uniswap v4 (`venues` includes `"uniswap-v4"`) — the killer cross-venue query, as a tool. |
 | `messari_swaps` | Recent `Swap` rows in Messari DEX-AMM shape (`pool { inputTokens }`, `tokenIn/amountIn`, `tokenOut/amountOut`) — the standards-leverage proof as a tool. |
+| `liquidity_pools` | All indexed v4 pools with live token symbols + per-pool indexed swap counts — so an agent can discover poolIds before filtering `messari_swaps`. |
+| `maker_safety_verdict` | Reasoned verdict (`SAFE`/`DERATED`/`HALTED`/`PAUSED`/`UNKNOWN`) with exposure %, cross-venue coverage, and latest swap — answers "is this maker safe on both venues?" directly. |
 
 ## Run it
 
