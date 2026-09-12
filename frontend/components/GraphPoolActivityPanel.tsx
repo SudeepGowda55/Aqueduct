@@ -27,12 +27,14 @@ interface SwapRow {
   timestamp: string;
 }
 
-const QUERY = `{
+function buildQuery(poolId: string): string {
+  const swapsWhere = poolId === "all" ? "" : `(where: { pool: "${poolId}" }, `;
+  return `{
   liquidityPools {
     id name cumulativeVolumeUSD
     inputTokens { id symbol name decimals }
   }
-  swaps(first: 20, orderBy: blockNumber, orderDirection: desc) {
+  swaps${swapsWhere}first: 20, orderBy: blockNumber, orderDirection: desc) {
     id hash blockNumber timestamp
     pool { id name }
     tokenIn { symbol } amountIn
@@ -40,6 +42,7 @@ const QUERY = `{
   }
   swapStats: swaps(first: 1000) { pool { id } }
 }`;
+}
 
 const PROOF_QUERY = `{
   liquidityPools {
@@ -80,6 +83,7 @@ export function GraphPoolActivityPanel() {
   const [pools, setPools] = useState<PoolRow[] | null>(null);
   const [swaps, setSwaps] = useState<SwapRow[] | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [poolFilter, setPoolFilter] = useState<string>("all");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -90,7 +94,7 @@ export function GraphPoolActivityPanel() {
         const res = await fetch(SUBGRAPH_URL, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ query: QUERY }),
+          body: JSON.stringify({ query: buildQuery(poolFilter) }),
         });
         if (!res.ok) throw new Error(`subgraph HTTP ${res.status}`);
         const body = await res.json();
@@ -115,7 +119,7 @@ export function GraphPoolActivityPanel() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [poolFilter]);
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
@@ -127,6 +131,27 @@ export function GraphPoolActivityPanel() {
       </p>
       {error && <p className="mt-3 text-sm text-red-400">Subgraph query failed: {error}</p>}
       {!pools && !error && <p className="mt-3 text-sm text-neutral-500">Loading from subgraph…</p>}
+
+      {pools && (
+        <div className="mt-3 flex items-center gap-2">
+          <label htmlFor="pool-filter" className="text-xs text-neutral-500">
+            Pool
+          </label>
+          <select
+            id="pool-filter"
+            className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1 text-xs text-neutral-200"
+            value={poolFilter}
+            onChange={(e) => setPoolFilter(e.target.value)}
+          >
+            <option value="all">All pools</option>
+            {pools.map((p) => (
+              <option key={p.id} value={p.id}>
+                {(p.name ?? p.id).split(" / ")[0]} ({counts[p.id] ?? 0})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {pools && (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
