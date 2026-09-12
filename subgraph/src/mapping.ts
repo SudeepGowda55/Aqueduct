@@ -234,14 +234,25 @@ let MAX_EXPOSURE_BPS = BigInt.fromI32(5000);
 let HALT_EXPOSURE_BPS = BigInt.fromI32(9000);
 
 // Uniswap v4 poolId (keccak256 of the pool key) -> strategyHash it is bound
-// to. Pool 1 (hook 0xE115..) <-> Strategy A; pool 2 (hook 0x7aec..) <->
-// Strategy F (proven: pool-2 swaps pull from 0xeb6c.. on-chain).
+// to. Pool 1 (hook 0xE115..) <-> Strategy A (old router); pool 2 (hook
+// 0x7aec..) <-> Strategy F (proven: pool-2 swaps pull from 0xeb6c.. on-chain).
+// Two new pools below bind the NEW Strategy A (0x0581..) under the fixed
+// router: static-fee v4 pool + risk-adjusted dynamic-fee v4 pool. Old entries
+// stay (harmless, they just go quiet).
 function strategyForPool(poolIdHex: string): string | null {
   if (poolIdHex == "0xeadf84808fa273e1837ebbfa022259d7e687c42f23fbea74bac849532b8ff8f8") {
     return "0x828353ec4866ca0f45f4bf5420875cba5a8d4afc8289eb98952016effab195e2";
   }
   if (poolIdHex == "0xafc0c968366c3ee3a813d16d5ca0960a5dc53e908dd316d011d8c1d7b6951359") {
     return "0xeb6cd6ba1b79355b923d569650736df8070377d7276b3fc086cafb0eac560777";
+  }
+  // NEW — Strategy A under the new (fixed) router, static-fee v4 pool
+  if (poolIdHex == "0x54e7faa821dfc1832bcf0f16aa0e8545c5f142e9a9c6e9962b05f2dec3948b76") {
+    return "0x0581e5d8783c51f4d45d190a41fee043d7859b8998373296acfc618baa0e64e7";
+  }
+  // NEW — same Strategy A, second pool with a risk-adjusted dynamic fee
+  if (poolIdHex == "0x7bf07bfabe7eb1773eb3be5a319ddbaa59db133427d56e0508ad6c42958d047a") {
+    return "0x0581e5d8783c51f4d45d190a41fee043d7859b8998373296acfc618baa0e64e7";
   }
   return null;
 }
@@ -251,7 +262,8 @@ function strategyForPool(poolIdHex: string): string | null {
 function hasV4Venue(strategyHashHex: string): boolean {
   return (
     strategyHashHex == "0x828353ec4866ca0f45f4bf5420875cba5a8d4afc8289eb98952016effab195e2" ||
-    strategyHashHex == "0xeb6cd6ba1b79355b923d569650736df8070377d7276b3fc086cafb0eac560777"
+    strategyHashHex == "0xeb6cd6ba1b79355b923d569650736df8070377d7276b3fc086cafb0eac560777" ||
+    strategyHashHex == "0x0581e5d8783c51f4d45d190a41fee043d7859b8998373296acfc618baa0e64e7"
   );
 }
 
