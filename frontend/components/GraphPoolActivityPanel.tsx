@@ -28,7 +28,7 @@ interface SwapRow {
 }
 
 function buildQuery(poolId: string): string {
-  const swapsWhere = poolId === "all" ? "" : `(where: { pool: "${poolId}" }, `;
+  const swapsWhere = poolId === "all" ? "(" : `(where: { pool: "${poolId}" }, `;
   return `{
   liquidityPools {
     id name cumulativeVolumeUSD
