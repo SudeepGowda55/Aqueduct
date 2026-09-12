@@ -14,14 +14,26 @@ import { Decay } from "@1inch/swap-vm/src/instructions/Decay.sol";
 import { Fee } from "@1inch/swap-vm/src/instructions/Fee.sol";
 import { PeggedSwap } from "@1inch/swap-vm/src/instructions/PeggedSwap.sol";
 import { Extruction } from "@1inch/swap-vm/src/instructions/Extruction.sol";
+import { OraclePriceAdjuster } from "@1inch/swap-vm/src/instructions/OraclePriceAdjuster.sol";
 
 import { ExposureGate } from "./ExposureGate.sol";
 
 /// @title ExposureAquaOpcodes
-/// @notice 1inch's AquaOpcodes instruction set with one new instruction appended: `_exposureGate1D`.
-/// @dev This is a byte-for-byte copy of AquaOpcodes._opcodes()'s instruction table, plus a single
-///      new opcode slot at the end. Every existing opcode keeps its original index, so any
-///      program built against stock AquaOpcodes remains valid against this set.
+/// @notice 1inch's AquaOpcodes instruction set with two new instructions appended.
+/// @dev This is a byte-for-byte copy of AquaOpcodes._opcodes()'s instruction table, plus two new
+///      opcode slots at the end. Every existing opcode keeps its original index, so any program
+///      built against stock AquaOpcodes remains valid against this set.
+///        - index 35: `_exposureGate1D` -- this project's own new instruction.
+///        - index 36: `_oraclePriceAdjuster1D` -- ALREADY SHIPPED in 1inch's own swap-vm library
+///          (`instructions/OraclePriceAdjuster.sol`), but never wired into stock `AquaOpcodes`'s
+///          own instruction table (see `lib/swap-vm/src/opcodes/AquaOpcodes.sol` -- it isn't in
+///          that inheritance list or that array at all). Composed here for real, for the first
+///          time, into a genuine Aqua position: a maker program that is simultaneously
+///          price-aware (this instruction only ever improves the taker's price toward a Chainlink
+///          feed, capped) and exposure-aware (`_exposureGate1D` only ever worsens the fill toward
+///          the maker's real risk, capped the other direction) -- two independently-bounded,
+///          opposite-direction safety instructions on the same fill. See
+///          `test/SophisticatedPosition.t.sol` for the composed proof.
 contract ExposureAquaOpcodes is
     Controls,
     XYCSwap,
@@ -30,14 +42,15 @@ contract ExposureAquaOpcodes is
     Fee,
     PeggedSwap,
     Extruction,
-    ExposureGate
+    ExposureGate,
+    OraclePriceAdjuster
 {
     constructor(address aqua) Fee(aqua) {}
 
     function _notInstruction(Context memory /* ctx */, bytes calldata /* args */) internal view {}
 
     function _opcodes() internal pure virtual returns (function(Context memory, bytes calldata) internal[] memory result) {
-        function(Context memory, bytes calldata) internal[36] memory instructions = [
+        function(Context memory, bytes calldata) internal[37] memory instructions = [
             _notInstruction,
             // Debug - reserved for debugging utilities (core infrastructure)
             _notInstruction,
@@ -80,7 +93,9 @@ contract ExposureAquaOpcodes is
             Extruction._extruction,
             Controls._onlyTxOriginTokenBalanceNonZero,
             // Aqueduct: new instruction, appended at the end (index 35)
-            ExposureGate._exposureGate1D
+            ExposureGate._exposureGate1D,
+            // index 36: 1inch's own OraclePriceAdjuster, wired up for the first time
+            OraclePriceAdjuster._oraclePriceAdjuster1D
         ];
 
         // Efficiently turning static memory array into dynamic memory array
