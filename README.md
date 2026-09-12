@@ -59,10 +59,10 @@ swapper's input (legal, since claims are accounting entries, not a real-balance 
 external leg — a real Aqua maker strategy, executed through its full exposure-gated SwapVM program
 — from its own pre-seeded balance, settles the real output to the swapper, and later reconciles the
 float via a permissionless `sweepClaims()`. Full mechanism:
-[`src/hooks/AquaV4Hook.sol`](src/hooks/AquaV4Hook.sol) lines 23–40 (contract-level doc) and
-[lines 80–88](src/hooks/AquaV4Hook.sol#L80-L88) (`_fillFromExternalLiquidity` itself); the
+[`src/hooks/AquaV4Hook.sol`](src/hooks/AquaV4Hook.sol) lines 20–63 (contract-level doc) and
+[lines 111–119](src/hooks/AquaV4Hook.sol#L111-L119) (`_fillFromExternalLiquidity` itself); the
 shared claims/float/settle/sweep machinery it runs inside lives in
-[`src/hooks/AsyncLiquidityHook.sol`](src/hooks/AsyncLiquidityHook.sol#L154-L174) (`_beforeSwap`).
+[`src/hooks/AsyncLiquidityHook.sol`](src/hooks/AsyncLiquidityHook.sol#L169-L194) (`_beforeSwap`).
 
 **Extracted into a reusable base, not kept as a private detail:**
 [`src/hooks/AsyncLiquidityHook.sol`](src/hooks/AsyncLiquidityHook.sol) implements that entire
@@ -224,7 +224,7 @@ the verification script.
 | Stateful-fuzz invariant suite: a handler drives random pushes/pauses/swaps for 128,000 calls, checked against ghost accounting per token | [`test/ExposureGateInvariant.t.sol`](test/ExposureGateInvariant.t.sol) |
 | The composed price-adjuster + exposure-gate position ("Strategy P"), with the exact-formula proof both bounds hold from either direction | [`test/SophisticatedPosition.t.sol`](test/SophisticatedPosition.t.sol) |
 | The real fix for the maker-pause bug: fresh router, re-shipped strategies, new sophisticated position, exact-selector fix verification | [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol) |
-| The risk-adjusted dynamic-fee capability: per-swap fee override + persisted `updateDynamicLPFee`, both driven by the same exposure oracle | [`src/hooks/AquaV4Hook.sol`](src/hooks/AquaV4Hook.sol) (`_applyFee`, `_riskFeePips`, `refreshFee`) |
+| The risk-adjusted dynamic-fee capability: per-swap fee override + persisted `updateDynamicLPFee`, both driven by the same exposure oracle | [`src/hooks/AquaV4Hook.sol`](src/hooks/AquaV4Hook.sol) — [`_riskFeePips` (L121–129)](src/hooks/AquaV4Hook.sol#L121-L129), [`_applyFee` (L131–140)](src/hooks/AquaV4Hook.sol#L131-L140), [`refreshFee` (L142–153)](src/hooks/AquaV4Hook.sol#L142-L153) |
 | Proof the dynamic fee is opt-in per pool (a static-fee pool bound to the same hook code is untouched) and matches the exact predicted formula at every exposure level | [`test/DynamicFeeHook.t.sol`](test/DynamicFeeHook.t.sol) |
 | The real Base Sepolia deployment of the dynamic-fee pool, verified against exact `require`d formulas and independently re-checked via raw storage reads | [`script/AqueductV3DynamicFee.s.sol`](script/AqueductV3DynamicFee.s.sol) |
 | End-to-end demo as real broadcast transactions on a local chain | [`script/AqueductDemo.s.sol`](script/AqueductDemo.s.sol) |
@@ -649,16 +649,36 @@ On top of the balance bookkeeping above, the subgraph maintains **one `ExposureP
   thresholds — every live strategy uses them, so no program-byte decoding). Maker-level events fan
   out to every position via an internal `Maker.positionIds` index, and each fan-out writes an
   immutable **`ExposureSnapshot`** — exposure-over-time (10% → 40% → 70% → 90%) is one ordered query.
-- **Uniswap v4 PoolManager** (`Swap`) → confirms the `uniswap-v4` venue. The hook-bound pool is
-  hardcoded as poolId → strategy; all other pools are ignored. No factory/discovery events exist,
-  so this mapping is intentionally manual — **and it goes stale whenever the router or hook is
-  redeployed**, since a new router is a new `app` identity (new `strategyHash`) and a new hook is a
-  new pool (new poolId). After [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol)
-  (see [Live on Base Sepolia](#live-on-base-sepolia) above), the current mapping needs to become
-  poolId `0x54e7faa821dfc1832bcf0f16aa0e8545c5f142e9a9c6e9962b05f2dec3948b76` → strategy hash
-  `0x0581e5d8783c51f4d45d190a41fee043d7859b8998373296acfc618baa0e64e7` (Strategy A, re-shipped under
-  the new router) — independently confirmed by decoding the real `Initialize` event emitted on
-  `PoolManager` in the redeploy's own broadcast transaction, not just computed offline.
+- **Uniswap v4 PoolManager** (`Swap`) → confirms the `uniswap-v4` venue. The hook-bound pools are
+  hardcoded as poolId → strategy in `strategyForPool()`; all other pools are ignored. No
+  factory/discovery events exist, so this mapping is intentionally manual — **and it goes stale
+  whenever the router or hook is redeployed**, since a new router is a new `app` identity (new
+  `strategyHash`) and a new hook is a new pool (new poolId). After
+  [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol) and
+  [`script/AqueductV3DynamicFee.s.sol`](script/AqueductV3DynamicFee.s.sol) (see [Live on Base
+  Sepolia](#live-on-base-sepolia) above), the mapping now includes both new Strategy A pools —
+  poolId `0x54e7faa821dfc1832bcf0f16aa0e8545c5f142e9a9c6e9962b05f2dec3948b76` (static-fee) and
+  poolId `0x7bf07bfabe7eb1773eb3be5a319ddbaa59db133427d56e0508ad6c42958d047a` (dynamic-fee), both →
+  strategy hash `0x0581e5d8783c51f4d45d190a41fee043d7859b8998373296acfc618baa0e64e7` — both
+  independently confirmed by decoding the real `Initialize` events emitted on `PoolManager` in
+  each redeploy's own broadcast transaction, not just computed offline.
+
+### A trimmed Messari DEX-AMM layer — building on a standardized schema
+
+On top of the project's own custom schema, the subgraph also populates a trimmed subset of
+[Messari's real DEX-AMM standardized schema](https://github.com/messari/subgraphs/blob/master/schema-dex-amm.graphql)
+(`Token`, `LiquidityPool`, `Swap` — same entity and field names) from the same
+`PoolManager.Swap` events already being indexed, so the exact query pattern that works against any
+real Messari-standardized DEX subgraph also returns real results here:
+```graphql
+{ liquidityPools { inputTokens { symbol } swaps { tokenIn { symbol } amountIn amountOut } } }
+```
+USD-denominated fields (`amountInUSD`, `cumulativeVolumeUSD`, etc.) are left at zero and documented
+as such rather than faked, since there is no USD price oracle on Base Sepolia. Also exposed as an
+MCP tool (`messari_swaps` in [`mcp/server.js`](mcp/server.js)). See
+[`subgraph/schema.graphql`](subgraph/schema.graphql) and
+[`subgraph/src/mapping.ts`](subgraph/src/mapping.ts) (`ensureMessariToken`, `ensureMessariPool`,
+the Messari-shape block in `handlePoolSwap`).
 
 The killer query — one `exposurePositions(where: {maker: ...})` returning the SwapVM *and* Uniswap
 v4 view of the same position, with `venues: ["swapvm", "uniswap-v4"]` on Strategies A and F:
