@@ -23,6 +23,11 @@ one, a stopped keeper, a maker who no longer trusts the feed — every one of th
 fill or no fill at all, never in a taker getting more than the maker's own program already
 authorized. See [Threat model](#threat-model) below for the full breakdown, scenario by scenario.
 
+> **For Uniswap track judges:** real developer feedback from building the v4 hook is in
+> [`FEEDBACK.md`](FEEDBACK.md), submitted via the
+> [Uniswap Developer Feedback Form](https://developers.uniswap.org/hackathon-feedback). See
+> [Uniswap v4 contribution](#uniswap-v4-contribution) below for exact contract/line pointers.
+
 ## Three core innovations
 
 Everything in this repo supports exactly three pieces, not a pile of loosely related features:
