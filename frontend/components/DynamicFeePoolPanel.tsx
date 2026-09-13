@@ -55,9 +55,11 @@ export function DynamicFeePoolPanel() {
   }, [deployment, pool, v4]);
 
   useEffect(() => {
-    readOnChainState().catch(() => {
-      // Best-effort background read; swap/refresh actions surface their own errors.
-    });
+    void (async () => {
+      await readOnChainState().catch(() => {
+        // Best-effort background read; swap/refresh actions surface their own errors.
+      });
+    })();
   }, [readOnChainState]);
 
   const refreshFee = async () => {
