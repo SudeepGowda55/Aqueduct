@@ -1,7 +1,8 @@
 // Server-side Subgraph proxy with rate-limit hardening.
 //
 // Why: the three Graph panels used to fetch
-// https://api.studio.thegraph.com/query/1758739/ethonline/v0.4.0
+// https://api.studio.thegraph.com/query/1758739/ethonline/v0.3.0 (pinned:
+// v0.4.0 currently returns 429 "Too many requests", v0.3.0 tested working)
 // directly from every browser every 15s. N visitors x 3 panels x 4/min
 // trips Studio's per-second quota -> HTTP 429 on all panels.
 //
@@ -15,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 const SUBGRAPH_URL =
   process.env.AQUA_SUBGRAPH_URL ??
-  "https://api.studio.thegraph.com/query/1758739/ethonline/v0.4.0";
+  "https://api.studio.thegraph.com/query/1758739/ethonline/v0.3.0";
 
 const TTL_MS = Number(process.env.GRAPH_CACHE_TTL_MS ?? 30_000);
 const MAX_RETRIES = 2;
