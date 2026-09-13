@@ -1,8 +1,8 @@
 "use client";
 
-import { Contract, formatUnits, parseUnits } from "ethers";
+import { Contract, formatUnits, Interface, parseUnits } from "ethers";
 import { useEffect, useState } from "react";
-import { ERC20_ABI, POOL_SWAP_TEST_ABI } from "@/lib/abis";
+import { ERC20_ABI, POOL_SWAP_TEST_ABI, SWAP_VM_ABI } from "@/lib/abis";
 import { useActivityLog } from "@/lib/ActivityLogProvider";
 import { MAX_SQRT_PRICE_LIMIT, MIN_SQRT_PRICE_LIMIT } from "@/lib/constants";
 import { useDeployment } from "@/lib/DeploymentProvider";
@@ -53,12 +53,9 @@ export function UniswapPanel() {
     setLastAmountOut(null);
     try {
       const tokenInAddr = zeroForOne ? v4.poolKey.currency0 : v4.poolKey.currency1;
-      const tokenOutAddr = zeroForOne ? v4.poolKey.currency1 : v4.poolKey.currency0;
       const tokenIn = new Contract(tokenInAddr, ERC20_ABI, signer);
-      const tokenOut = new Contract(tokenOutAddr, ERC20_ABI, signer);
       const decimals = await tokenIn.decimals();
       const amountWei = parseUnits(amount, decimals);
-      const balanceOutBefore: bigint = await tokenOut.balanceOf(address);
       const inSymbol = zeroForOne ? (symbol0 ?? "tokenIn") : (symbol1 ?? "tokenIn");
       const outSymbol = zeroForOne ? (symbol1 ?? "tokenOut") : (symbol0 ?? "tokenOut");
 
@@ -87,10 +84,23 @@ export function UniswapPanel() {
 
       log("info", `Swapping ${amount} ${inSymbol} for ${outSymbol} through the Uniswap v4 pool (sourced from Aqua)...`);
       const tx = await swapRouter.swap(key, params, testSettings, "0x");
-      await tx.wait();
+      const receipt = await tx.wait();
 
-      const balanceOutAfter: bigint = await tokenOut.balanceOf(address);
-      const amountOutText = formatUnits(balanceOutAfter - balanceOutBefore, decimals);
+      // The pool carries no liquidity of its own, so PoolManager's own Swap event reports zero
+      // deltas here (see AquaV4Hook._fillFromExternalLiquidity) -- the real fill amount is on the
+      // underlying SwapVM.Swapped event this same transaction emits. Reading it directly off the
+      // receipt avoids depending on the wallet provider's balanceOf read being fresh post-confirm.
+      const swapVMIface = new Interface(SWAP_VM_ABI);
+      const swappedLog = receipt.logs.find(
+        (l: { topics: string[] }) => l.topics[0] === swapVMIface.getEvent("Swapped")?.topicHash
+      );
+      let amountOutText = "(check activity log for tx)";
+      if (swappedLog) {
+        const parsed = swapVMIface.parseLog(swappedLog);
+        if (parsed) {
+          amountOutText = formatUnits(parsed.args.amountOut, decimals);
+        }
+      }
 
       setLastAmountOut(amountOutText);
       setLastOutSymbol(outSymbol);
