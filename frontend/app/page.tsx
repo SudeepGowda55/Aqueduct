@@ -9,6 +9,9 @@ import { DeploymentAddresses, DeploymentStatus } from "@/components/DeploymentSt
 import { DynamicFeePoolPanel } from "@/components/DynamicFeePoolPanel";
 import { EmergencyPausePanel } from "@/components/EmergencyPausePanel";
 import { ExposureGauge } from "@/components/ExposureGauge";
+import { GraphExposurePanel } from "@/components/GraphExposurePanel";
+import { GraphPoolActivityPanel } from "@/components/GraphPoolActivityPanel";
+import { GraphVerdictBanner } from "@/components/GraphVerdictBanner";
 import { KeeperPanel } from "@/components/KeeperPanel";
 import { RiskPolicyPanel } from "@/components/RiskPolicyPanel";
 import { SophisticatedPositionPanel } from "@/components/SophisticatedPositionPanel";
@@ -48,6 +51,12 @@ export default function Home() {
               </section>
 
               <CrossVenueProofPanel />
+
+              <GraphVerdictBanner />
+
+              <GraphExposurePanel />
+
+              <GraphPoolActivityPanel />
 
               <div className="grid gap-6 md:grid-cols-2">
                 <SwapVMPanel />
