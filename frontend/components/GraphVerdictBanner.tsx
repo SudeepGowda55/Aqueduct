@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useDeployment } from "@/lib/DeploymentProvider";
+import { fetchSubgraph, graphErrorMessage, startSubgraphPoll } from "@/lib/graphClient";
 
 // One-line safety verdict from the deployed subgraph
 // (Subgraph Studio `ethonline` v0.4.0) -- worst status across the maker's
 // positions, exposure vs thresholds, cross-venue coverage, latest swap.
-// Same reasoning as the MCP `maker_safety_verdict` tool. Refreshes every 15s.
-const SUBGRAPH_URL = "https://api.studio.thegraph.com/query/1758739/ethonline/v0.4.0";
+// Same reasoning as the MCP `maker_safety_verdict` tool.
+// Polled every 60s via the cached /api/subgraph proxy (staggered).
 
 interface PositionRow {
   strategyHash: string;
@@ -67,17 +68,13 @@ export function GraphVerdictBanner() {
         }
       }`;
       try {
-        const res = await fetch(SUBGRAPH_URL, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ query }),
-        });
-        if (!res.ok) throw new Error(`subgraph HTTP ${res.status}`);
-        const body = await res.json();
-        if (body.errors) throw new Error(JSON.stringify(body.errors).slice(0, 200));
+        const body = await fetchSubgraph<{
+          exposurePositions: PositionRow[];
+          swaps: SwapRow[];
+        }>(query);
         if (cancelled) return;
-        const rows = body.data.exposurePositions as PositionRow[];
-        const swaps = body.data.swaps as SwapRow[];
+        const rows = body.exposurePositions as PositionRow[];
+        const swaps = body.swaps as SwapRow[];
         if (rows.length === 0) {
           setVerdict("UNKNOWN");
           setSummary("No positions indexed for this maker yet.");
@@ -109,15 +106,16 @@ export function GraphVerdictBanner() {
         }
         setError(null);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(graphErrorMessage(err));
       }
     }
 
-    const interval = setInterval(fetchGraph, 15000);
+    // 60s staggered poll via cached proxy (was: direct Studio fetch every 15s).
+    const stop = startSubgraphPoll({ run: fetchGraph, initialDelayMs: 0 });
     fetchGraph();
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
   }, [deployment]);
 

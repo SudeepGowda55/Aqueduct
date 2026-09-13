@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { fetchSubgraph, graphErrorMessage, startSubgraphPoll } from "@/lib/graphClient";
 
 // Pool activity straight from the deployed subgraph
 // (Subgraph Studio `ethonline` v0.4.0) in trimmed Messari DEX-AMM shape --
 // the same `liquidityPools { swaps { tokenIn amountIn ... } }` pattern that
 // works against any real Messari-standardized DEX subgraph returns real rows
-// here. No RPC calls on this panel. Refreshes every 15s.
-const SUBGRAPH_URL = "https://api.studio.thegraph.com/query/1758739/ethonline/v0.4.0";
+// here. No RPC calls on this panel. Polled every 60s via the cached
+// /api/subgraph proxy (swapStats trimmed to first:200 to stay under quota).
 
 interface PoolRow {
   id: string;
@@ -34,13 +35,13 @@ function buildQuery(poolId: string): string {
     id name cumulativeVolumeUSD
     inputTokens { id symbol name decimals }
   }
-  swaps${swapsWhere}first: 20, orderBy: blockNumber, orderDirection: desc) {
+  swaps${swapsWhere}first: 10, orderBy: blockNumber, orderDirection: desc) {
     id hash blockNumber timestamp
     pool { id name }
     tokenIn { symbol } amountIn
     tokenOut { symbol } amountOut
   }
-  swapStats: swaps(first: 1000) { pool { id } }
+  swapStats: swaps(first: 200) { pool { id } }
 }`;
 }
 
@@ -91,33 +92,31 @@ export function GraphPoolActivityPanel() {
 
     async function fetchGraph() {
       try {
-        const res = await fetch(SUBGRAPH_URL, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ query: buildQuery(poolFilter) }),
-        });
-        if (!res.ok) throw new Error(`subgraph HTTP ${res.status}`);
-        const body = await res.json();
-        if (body.errors) throw new Error(JSON.stringify(body.errors).slice(0, 200));
+        const body = await fetchSubgraph<{
+          liquidityPools: PoolRow[];
+          swaps: SwapRow[];
+          swapStats: { pool: { id: string } }[];
+        }>(buildQuery(poolFilter));
         if (cancelled) return;
-        setPools(body.data.liquidityPools);
-        setSwaps(body.data.swaps);
+        setPools(body.liquidityPools);
+        setSwaps(body.swaps);
         const tally: Record<string, number> = {};
-        for (const s of body.data.swapStats as { pool: { id: string } }[]) {
+        for (const s of body.swapStats as { pool: { id: string } }[]) {
           tally[s.pool.id] = (tally[s.pool.id] ?? 0) + 1;
         }
         setCounts(tally);
         setError(null);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(graphErrorMessage(err));
       }
     }
 
-    const interval = setInterval(fetchGraph, 15000);
+    // 60s staggered poll via cached proxy (was: direct Studio fetch every 15s).
+    const stop = startSubgraphPoll({ run: fetchGraph, initialDelayMs: 10000 });
     fetchGraph();
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
   }, [poolFilter]);
 
@@ -127,7 +126,7 @@ export function GraphPoolActivityPanel() {
       <p className="mt-1 text-xs text-neutral-500">
         <span className="font-mono">liquidityPools</span> + <span className="font-mono">swaps</span> in
         Messari DEX-AMM field names — the same query pattern works against any standardized DEX
-        subgraph. No RPC calls on this panel. Refreshes every 15s.
+        subgraph. No RPC calls on this panel. Refreshes every 60s (cached).
       </p>
       {error && <p className="mt-3 text-sm text-red-400">Subgraph query failed: {error}</p>}
       {!pools && !error && <p className="mt-3 text-sm text-neutral-500">Loading from subgraph…</p>}

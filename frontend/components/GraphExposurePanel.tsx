@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useDeployment } from "@/lib/DeploymentProvider";
+import { fetchSubgraph, graphErrorMessage, startSubgraphPoll } from "@/lib/graphClient";
 
 // Everything on this panel comes from the deployed subgraph
 // (Subgraph Studio `ethonline` v0.4.0) -- not from RPC reads. The subgraph
 // joins Aqua commitments, ExposureOracle readings and v4 swaps into one
 // ExposurePosition per (maker, strategy), so this is a single GraphQL query,
-// not N contract calls.
-const SUBGRAPH_URL = "https://api.studio.thegraph.com/query/1758739/ethonline/v0.4.0";
+// not N contract calls. Polled every 60s via the cached /api/subgraph proxy.
 
 interface PositionRow {
   strategyHash: string;
@@ -64,33 +64,30 @@ export function GraphExposurePanel() {
           strategyHash venues committedAmount makerWalletBalance
           exposureBps maxExposureBps haltExposureBps status isPausedByMaker updatedAt
         }
-        exposureSnapshots(first: 60, orderBy: blockNumber, orderDirection: asc) {
+        exposureSnapshots(first: 30, orderBy: blockNumber, orderDirection: asc) {
           exposureBps status blockNumber blockTimestamp
         }
       }`;
       try {
-        const res = await fetch(SUBGRAPH_URL, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ query }),
-        });
-        if (!res.ok) throw new Error(`subgraph HTTP ${res.status}`);
-        const body = await res.json();
-        if (body.errors) throw new Error(JSON.stringify(body.errors).slice(0, 200));
+        const body = await fetchSubgraph<{
+          exposurePositions: PositionRow[];
+          exposureSnapshots: SnapshotRow[];
+        }>(query);
         if (cancelled) return;
-        setPositions(body.data.exposurePositions);
-        setSnapshots(body.data.exposureSnapshots);
+        setPositions(body.exposurePositions);
+        setSnapshots(body.exposureSnapshots);
         setError(null);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(graphErrorMessage(err));
       }
     }
 
-    const interval = setInterval(fetchGraph, 15000);
+    // 60s staggered poll via cached proxy (was: direct Studio fetch every 15s).
+    const stop = startSubgraphPoll({ run: fetchGraph, initialDelayMs: 5000 });
     fetchGraph();
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
   }, [deployment]);
 
@@ -111,7 +108,7 @@ export function GraphExposurePanel() {
       <h2 className="text-base font-semibold">Exposure, from The Graph</h2>
       <p className="mt-1 text-xs text-neutral-500">
         One <span className="font-mono">exposurePositions</span> query against the deployed subgraph joins Aqua
-        commitments, oracle readings and v4 swaps — no RPC calls on this panel. Refreshes every 15s.
+        commitments, oracle readings and v4 swaps — no RPC calls on this panel. Refreshes every 60s (cached).
       </p>
       {error && <p className="mt-3 text-sm text-red-400">Subgraph query failed: {error}</p>}
       {!positions && !error && <p className="mt-3 text-sm text-neutral-500">Loading from subgraph…</p>}
