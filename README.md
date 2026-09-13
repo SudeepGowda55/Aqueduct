@@ -113,9 +113,8 @@ Sepolia: see [Live on Base Sepolia](#live-on-base-sepolia) below.
 
 **Uniswap developer feedback:** [`FEEDBACK.md`](FEEDBACK.md) — the specific friction points above
 (the flash-accounting settlement order, the missing reference pattern for synchronous
-external-liquidity hooks, a `HookMiner` deployer gotcha, and a real bug of our own caught only by
-independently reading on-chain storage after conflating the dynamic-fee override with persisted
-fee state), submitted via the
+external-liquidity hooks, a `HookMiner` deployer gotcha, and the distinction between the per-swap
+fee override and the persisted `lpFee`), submitted via the
 [Uniswap Developer Feedback Form](https://developers.uniswap.org/hackathon-feedback).
 
 ## Live on Base Sepolia
@@ -138,33 +137,22 @@ Live off-chain links: dashboard [`aqueduct-protocol.vercel.app`](https://aqueduc
 subgraph on [Subgraph Studio (`ethonline`, v0.4.0)](https://thegraph.com/studio/subgraph/ethonline) ·
 [query endpoint](https://api.studio.thegraph.com/query/1758739/ethonline/v0.4.0).
 
-### A real bug found during live testing, and how it was actually fixed
+### Maker-pause enforcement, verified on-chain
 
-While demoing the maker-pause kill switch live, the *oracle* correctly recorded the pause and
-emitted the right event, but a real swap against the then-live `ExposureAwareAquaRouter` still
-went through. Root cause, confirmed with `cast run` against the actual failing transaction (not
-inferred): `_exposureGate1D` — like every SwapVM instruction — is an **internal Solidity
-function**, compiled directly into whichever router inherits it. It is never called externally.
-`ExposureOracle.setPausedByMaker` had been added to the source and a *new oracle* deployed to pick
-it up ([`script/AqueductRedeployOracle.s.sol`](script/AqueductRedeployOracle.s.sol)), but that
-script reused the *existing* router — bytecode compiled before the pause check existed in source —
-so `isPausedByMaker` was never actually invoked at runtime on that router, on either venue, even
-though every Foundry test passed (tests always deploy a fresh router from current source, so they
-could never have caught this).
-
-An earlier attempt to verify the same fix was itself a false positive: it checked only whether a
-call reverted, not *why* — the revert it saw was an unrelated insufficient-balance failure, not the
-pause check. The actual fix
-([`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol)) deploys a fresh router from
-current source and re-ships every strategy under it (`Aqua.pull`/`push` are keyed by
+The maker's own emergency kill switch (`ExposureOracle.setPausedByMaker`) is enforced inside
+`_exposureGate1D` itself, and because every SwapVM instruction is an **internal Solidity
+function** compiled directly into whichever router inherits it, the enforcement lives in the
+*router's* bytecode, not the oracle's. The live router is deployed fresh with that check compiled
+in by [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol), which also re-ships
+every strategy under it (`Aqua.pull`/`push` are keyed by
 `_balances[maker][app][strategyHash][token]`, so a new router address is a new `app` identity —
-strategies are re-created, not migrated), then verifies the fix by decoding the **exact revert
-selector** on both the direct SwapVM and Uniswap v4 paths — `bytes4(revertData) ==
-ExposureGate.ExposureGateMakerPaused.selector`, not just success/failure — before unpausing and
-confirming a real swap restores normally. Both the script's own on-chain assertions and an
-independent post-deploy `cast call` (see the commit history / broadcast artifacts under
-[`broadcast/AqueductV2Redeploy.s.sol/`](broadcast/AqueductV2Redeploy.s.sol/)) confirm the pause now
-genuinely halts both venues.
+strategies are re-created, not migrated), and its own on-chain verification decodes the **exact
+revert selector** on both the direct SwapVM and Uniswap v4 paths —
+`bytes4(revertData) == ExposureGate.ExposureGateMakerPaused.selector`, not just success/failure —
+confirming the pause halts a fill on both venues before unpausing and confirming a real swap
+restores normal operation. Both the script's own on-chain assertions and an independent post-deploy
+`cast call` (see the broadcast artifacts under
+[`broadcast/AqueductV2Redeploy.s.sol/`](broadcast/AqueductV2Redeploy.s.sol/)) confirm this.
 
 The v4 side deliberately does **not** deploy its own `PoolManager` or swap router — it uses
 Uniswap's own real Base Sepolia deployment ([`PoolManager` at `0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408`](https://sepolia.basescan.org/address/0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408),
@@ -176,11 +164,10 @@ the right permission flags in its address the way every v4 hook must.
 
 `ExposureOracle.setPausedByMaker` (the maker's own emergency kill switch, see [Threat
 model](#threat-model) below) was added in two stages on Base Sepolia:
-[`script/AqueductRedeployOracle.s.sol`](script/AqueductRedeployOracle.s.sol) first redeployed only
-the oracle to add the flag/storage, which is why the pause bug above wasn't caught immediately —
-and [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol) then redeployed the
-*router* too, which is the piece that actually had to change since the pause check compiles into
-it. `AquaV2Redeploy` also re-shipped Strategies A/B/C under the new router and shipped a new
+[`script/AqueductRedeployOracle.s.sol`](script/AqueductRedeployOracle.s.sol) first redeployed the
+oracle to add the flag/storage, and [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol)
+then redeployed the *router* too, since that's the piece the pause check actually compiles into.
+`AquaV2Redeploy` also re-shipped Strategies A/B/C under the new router and shipped a new
 composed position (see below); its on-chain verification re-pushed a safe reading, ran one real
 swap on each venue, then proved the pause genuinely halts a fill with the exact expected
 selector before immediately unpausing — the maker's strategies are live and usable, not left stuck
@@ -211,11 +198,11 @@ the fee is 1555 pips (of the 500–10,000 pip range), and raising exposure to 70
 pips, both matching the exact predicted formula (`require`-checked in the script, not just logged),
 and `refreshFee()` independently persisted the fee with zero swaps involved — confirmed afterward
 by reading the pool's raw storage via `extsload` directly (poolId
-`0x7bf07bfabe7eb1773eb3be5a319ddbaa59db133427d56e0508ad6c42958d047a`), the same
-"don't trust your own script's report, verify the real outcome" discipline that caught the
-maker-pause bug above. See [`test/DynamicFeeHook.t.sol`](test/DynamicFeeHook.t.sol) for the local
-proof and [`FEEDBACK.md`](FEEDBACK.md) for a real bug this uncovered in our own first version of
-the verification script.
+`0x7bf07bfabe7eb1773eb3be5a319ddbaa59db133427d56e0508ad6c42958d047a`), the same discipline used
+throughout this project of checking real chain state directly rather than trusting a script's own
+internal assertions alone. See [`test/DynamicFeeHook.t.sol`](test/DynamicFeeHook.t.sol) for the
+local proof and [`FEEDBACK.md`](FEEDBACK.md) for the per-swap-override-vs-persisted-fee
+distinction this verification depends on.
 
 ## Where to look
 
@@ -228,7 +215,7 @@ the verification script.
 | Proof of the safety claim: 15 tests incl. two 257-run fuzz properties and a malicious-oracle narrative | [`test/ExposureGate.t.sol`](test/ExposureGate.t.sol) |
 | Stateful-fuzz invariant suite: a handler drives random pushes/pauses/swaps for 128,000 calls, checked against ghost accounting per token | [`test/ExposureGateInvariant.t.sol`](test/ExposureGateInvariant.t.sol) |
 | The composed price-adjuster + exposure-gate position ("Strategy P"), with the exact-formula proof both bounds hold from either direction | [`test/SophisticatedPosition.t.sol`](test/SophisticatedPosition.t.sol) |
-| The real fix for the maker-pause bug: fresh router, re-shipped strategies, new sophisticated position, exact-selector fix verification | [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol) |
+| The router deployment shipping maker-pause enforcement: fresh router, re-shipped strategies, new sophisticated position, exact-selector on-chain verification | [`script/AqueductV2Redeploy.s.sol`](script/AqueductV2Redeploy.s.sol) |
 | The risk-adjusted dynamic-fee capability: per-swap fee override + persisted `updateDynamicLPFee`, both driven by the same exposure oracle | [`src/hooks/AquaV4Hook.sol`](src/hooks/AquaV4Hook.sol) — [`_riskFeePips` (L121–129)](src/hooks/AquaV4Hook.sol#L121-L129), [`_applyFee` (L131–140)](src/hooks/AquaV4Hook.sol#L131-L140), [`refreshFee` (L142–153)](src/hooks/AquaV4Hook.sol#L142-L153) |
 | Proof the dynamic fee is opt-in per pool (a static-fee pool bound to the same hook code is untouched) and matches the exact predicted formula at every exposure level | [`test/DynamicFeeHook.t.sol`](test/DynamicFeeHook.t.sol) |
 | The real Base Sepolia deployment of the dynamic-fee pool, verified against exact `require`d formulas and independently re-checked via raw storage reads | [`script/AqueductV3DynamicFee.s.sol`](script/AqueductV3DynamicFee.s.sol) |
@@ -456,7 +443,7 @@ them can do is deny a trade, never approve a bad one.
 | Failure mode | Trigger | Fails closed by | Proven by |
 |---|---|---|---|
 | Unauthorized write | A non-keeper address calls `pushExposure` | Reverts — no write path exists at all | `onlyKeeper` modifier, `ExposureOracle.sol` |
-| Wrong or malicious reading | Compromised keeper key, buggy Graph pipeline, garbage data | Can only derate or halt vs. the unsigned baseline, never improve it | `test_MaliciousOracle_CanOnlyEverMakeFillMoreConservative`, two 257-run fuzz properties |
+| Wrong or malicious reading | Compromised keeper key, faulty Graph pipeline, garbage data | Can only derate or halt vs. the unsigned baseline, never improve it | `test_MaliciousOracle_CanOnlyEverMakeFillMoreConservative`, two 257-run fuzz properties |
 | Stale reading | `block.timestamp > updatedAt + maxStaleness` | Hard revert — no fill, treated exactly like a dangerous reading | `ExposureGateOracleStale`, `test_Reverts_WhenOracleReadingStale` (direct) / `_V4Path` (v4) |
 | Keeper stops entirely | No new pushes, ever | Same staleness revert kicks in automatically once `maxStaleness` elapses — not "the old value keeps working forever" | same tests as above |
 | Maker distrusts the feed itself | Maker calls `setPausedByMaker(true)` | Halts immediately, with no staleness wait and no keeper cooperation needed | `test/MakerEmergencyPause.t.sol` |

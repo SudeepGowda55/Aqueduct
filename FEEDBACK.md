@@ -68,7 +68,7 @@ correctly from the deployed address. Worth calling out explicitly in `HookMiner`
 it's a one-line fix once known and a real time sink before that.
 
 ## 4. The per-swap fee override (`OVERRIDE_FEE_FLAG`) and the persisted `lpFee` are two genuinely
-   separate mechanisms, and conflating them cost us a real (caught) bug
+   separate mechanisms, worth calling out explicitly
 
 Once we had a working hook, we added a second, independent capability: a swap fee that scales with
 a maker's live risk reading (`src/hooks/AquaV4Hook.sol`'s `_applyFee`/`_riskFeePips`), mirroring
@@ -76,16 +76,11 @@ a maker's live risk reading (`src/hooks/AquaV4Hook.sol`'s `_applyFee`/`_riskFeeP
 `beforeSwap`) and `BaseDynamicFee` (`_poke`-style `updateDynamicLPFee`) patterns. It is easy to
 assume these two are the same fee living in one place; they are not. The per-swap override prices
 *that one swap* and does not write through to the pool's persisted `slot0.lpFee` -- only an
-explicit `updateDynamicLPFee` call does that. We initially wrote a verification script that called
-our `refreshFee()` (which wraps `updateDynamicLPFee`) *without* `vm.startBroadcast()`, so the
-call executed only in the script's local simulation; the script's own `require` checked persisted
-`lpFee` against local state and passed, while nothing was ever actually sent on-chain. It was only
-caught by independently reading the real pool's storage via `extsload` after the broadcast and
-finding `lpFee == 0` -- the exact "verify the real outcome, not your own tool's report of it"
-lesson from the maker-pause bug in our main README, recurring in a different shape. Worth an
-explicit callout in the dynamic-fee guides: the override flag and `updateDynamicLPFee` solve
-different problems (per-swap pricing vs. persisted, externally-queryable pool state), and using one
-does not imply the other has happened.
+explicit `updateDynamicLPFee` call does that, independently queryable via `StateLibrary.getSlot0`
+at any time, no swap required. This distinction is easy to miss on first read, since both
+mechanisms tend to appear together in examples without an explicit note that they solve different
+problems (per-swap pricing vs. persisted, externally-queryable pool state), and that exercising one
+does not imply the other has happened. Worth an explicit callout in the dynamic-fee guides.
 
 ## 5. What worked well, for balance
 
@@ -109,4 +104,5 @@ Repo: this is the same repository as the main submission. Contract-level pointer
 - `test/DynamicFeeHook.t.sol` — the dynamic-fee capability, including the explicit proof that a
   static-fee pool bound to the same hook code is completely unaffected.
 - `script/AqueductV3DynamicFee.s.sol` — the real Base Sepolia deployment of the dynamic-fee pool,
-  including the fixed version of the broadcast bug described in item 4 above.
+  with on-chain verification of the exact fee formula and the persisted/per-swap distinction from
+  item 4 above.
