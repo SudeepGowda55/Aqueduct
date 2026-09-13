@@ -14,7 +14,7 @@ export function SwapVMPanel() {
   const { deployment } = useDeployment();
   const { address, signer } = useWallet();
   const { log } = useActivityLog();
-  const [amount, setAmount] = useState("10");
+  const [amount, setAmount] = useState("1");
   const [reversed, setReversed] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
   const [lastAmountOut, setLastAmountOut] = useState<string | null>(null);
