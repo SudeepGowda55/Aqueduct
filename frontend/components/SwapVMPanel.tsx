@@ -1,12 +1,13 @@
 "use client";
 
 import { Contract, formatUnits, parseUnits } from "ethers";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ERC20_ABI, SWAP_VM_ABI } from "@/lib/abis";
 import { useActivityLog } from "@/lib/ActivityLogProvider";
 import { EOA_TAKER_TRAITS_AND_DATA } from "@/lib/constants";
 import { useDeployment } from "@/lib/DeploymentProvider";
 import { decodeRevertReason } from "@/lib/decodeError";
+import { getReadProvider } from "@/lib/readProvider";
 import { useWallet } from "@/lib/WalletProvider";
 
 export function SwapVMPanel() {
@@ -17,6 +18,30 @@ export function SwapVMPanel() {
   const [reversed, setReversed] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
   const [lastAmountOut, setLastAmountOut] = useState<string | null>(null);
+  const [lastOutSymbol, setLastOutSymbol] = useState<string>("");
+  const [symbolIn, setSymbolIn] = useState<string | null>(null);
+  const [symbolOut, setSymbolOut] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!deployment) return;
+    let cancelled = false;
+    const provider = getReadProvider();
+    Promise.all([
+      new Contract(deployment.tokenIn, ERC20_ABI, provider).symbol(),
+      new Contract(deployment.tokenOut, ERC20_ABI, provider).symbol(),
+    ])
+      .then(([symIn, symOut]) => {
+        if (cancelled) return;
+        setSymbolIn(symIn);
+        setSymbolOut(symOut);
+      })
+      .catch(() => {
+        // Falls back to the generic "tokenIn"/"tokenOut" labels below.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deployment]);
 
   const canSwap = Boolean(deployment && address && signer && amount);
 
@@ -33,9 +58,12 @@ export function SwapVMPanel() {
       const decimals = await tokenIn.decimals();
       const amountWei = parseUnits(amount, decimals);
 
+      const inSymbol = reversed ? (symbolOut ?? "tokenIn") : (symbolIn ?? "tokenIn");
+      const outSymbol = reversed ? (symbolIn ?? "tokenOut") : (symbolOut ?? "tokenOut");
+
       const allowance: bigint = await tokenIn.allowance(address, deployment.swapVM);
       if (allowance < amountWei) {
-        log("info", "Approving SwapVM to spend tokenIn...");
+        log("info", `Approving SwapVM to spend ${inSymbol}...`);
         const approveTx = await tokenIn.approve(deployment.swapVM, amountWei);
         await approveTx.wait();
         log("success", "Approved.", approveTx.hash);
@@ -48,7 +76,7 @@ export function SwapVMPanel() {
         data: deployment.order.data,
       };
 
-      log("info", `Swapping ${amount} tokens directly through SwapVM...`);
+      log("info", `Swapping ${amount} ${inSymbol} for ${outSymbol} directly through SwapVM...`);
       const tx = await swapVM.swap(order, tokenInAddr, tokenOutAddr, amountWei, EOA_TAKER_TRAITS_AND_DATA);
       const receipt = await tx.wait();
 
@@ -64,7 +92,8 @@ export function SwapVMPanel() {
         }
       }
       setLastAmountOut(amountOutText);
-      log("success", `Swap filled -- received ${amountOutText} tokens.`, tx.hash);
+      setLastOutSymbol(outSymbol);
+      log("success", `Swap filled -- received ${amountOutText} ${outSymbol}.`, tx.hash);
     } catch (err) {
       const reason = decodeRevertReason(err);
       log("error", `Swap failed: ${reason}`);
@@ -82,7 +111,7 @@ export function SwapVMPanel() {
         transfer for you). Runs through the maker&apos;s program, including the exposure gate.
       </p>
       <div className="mt-4 flex items-center gap-2 text-xs text-neutral-400">
-        <span>{reversed ? "tokenOut" : "tokenIn"}</span>
+        <span>{reversed ? (symbolOut ?? "tokenOut") : (symbolIn ?? "tokenIn")}</span>
         <button
           onClick={() => setReversed((r) => !r)}
           className="rounded-full border border-neutral-700 px-2 py-1 hover:bg-neutral-800"
@@ -90,7 +119,7 @@ export function SwapVMPanel() {
         >
           ⇄
         </button>
-        <span>{reversed ? "tokenIn" : "tokenOut"}</span>
+        <span>{reversed ? (symbolIn ?? "tokenIn") : (symbolOut ?? "tokenOut")}</span>
       </div>
       <div className="mt-3 flex gap-2">
         <input
@@ -110,7 +139,11 @@ export function SwapVMPanel() {
         </button>
       </div>
       {!address && <p className="mt-2 text-xs text-neutral-600">Connect a wallet to swap.</p>}
-      {lastAmountOut && <p className="mt-2 text-xs text-emerald-400">Received: {lastAmountOut}</p>}
+      {lastAmountOut && (
+        <p className="mt-2 text-xs text-emerald-400">
+          Received: {lastAmountOut} {lastOutSymbol}
+        </p>
+      )}
     </div>
   );
 }

@@ -1,12 +1,13 @@
 "use client";
 
 import { Contract, formatUnits, parseUnits } from "ethers";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ERC20_ABI, POOL_SWAP_TEST_ABI } from "@/lib/abis";
 import { useActivityLog } from "@/lib/ActivityLogProvider";
 import { MAX_SQRT_PRICE_LIMIT, MIN_SQRT_PRICE_LIMIT } from "@/lib/constants";
 import { useDeployment } from "@/lib/DeploymentProvider";
 import { decodeRevertReason } from "@/lib/decodeError";
+import { getReadProvider } from "@/lib/readProvider";
 import { useWallet } from "@/lib/WalletProvider";
 
 export function UniswapPanel() {
@@ -17,8 +18,33 @@ export function UniswapPanel() {
   const [zeroForOne, setZeroForOne] = useState(true);
   const [isSwapping, setIsSwapping] = useState(false);
   const [lastAmountOut, setLastAmountOut] = useState<string | null>(null);
+  const [lastOutSymbol, setLastOutSymbol] = useState<string>("");
+  const [symbol0, setSymbol0] = useState<string | null>(null);
+  const [symbol1, setSymbol1] = useState<string | null>(null);
 
   const v4 = deployment?.v4;
+
+  useEffect(() => {
+    if (!v4) return;
+    let cancelled = false;
+    const provider = getReadProvider();
+    Promise.all([
+      new Contract(v4.poolKey.currency0, ERC20_ABI, provider).symbol(),
+      new Contract(v4.poolKey.currency1, ERC20_ABI, provider).symbol(),
+    ])
+      .then(([sym0, sym1]) => {
+        if (cancelled) return;
+        setSymbol0(sym0);
+        setSymbol1(sym1);
+      })
+      .catch(() => {
+        // Falls back to the generic "tokenIn"/"tokenOut" labels below.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [v4]);
+
   const canSwap = Boolean(v4 && address && signer && amount);
 
   const swap = async () => {
@@ -33,10 +59,12 @@ export function UniswapPanel() {
       const decimals = await tokenIn.decimals();
       const amountWei = parseUnits(amount, decimals);
       const balanceOutBefore: bigint = await tokenOut.balanceOf(address);
+      const inSymbol = zeroForOne ? (symbol0 ?? "tokenIn") : (symbol1 ?? "tokenIn");
+      const outSymbol = zeroForOne ? (symbol1 ?? "tokenOut") : (symbol0 ?? "tokenOut");
 
       const allowance: bigint = await tokenIn.allowance(address, v4.swapRouter);
       if (allowance < amountWei) {
-        log("info", "Approving the v4 swap router to spend tokenIn...");
+        log("info", `Approving the v4 swap router to spend ${inSymbol}...`);
         const approveTx = await tokenIn.approve(v4.swapRouter, amountWei);
         await approveTx.wait();
         log("success", "Approved.", approveTx.hash);
@@ -57,7 +85,7 @@ export function UniswapPanel() {
       };
       const testSettings = { takeClaims: false, settleUsingBurn: false };
 
-      log("info", `Swapping ${amount} tokens through the Uniswap v4 pool (sourced from Aqua)...`);
+      log("info", `Swapping ${amount} ${inSymbol} for ${outSymbol} through the Uniswap v4 pool (sourced from Aqua)...`);
       const tx = await swapRouter.swap(key, params, testSettings, "0x");
       await tx.wait();
 
@@ -65,7 +93,8 @@ export function UniswapPanel() {
       const amountOutText = formatUnits(balanceOutAfter - balanceOutBefore, decimals);
 
       setLastAmountOut(amountOutText);
-      log("success", `Swap filled -- received ${amountOutText} tokens.`, tx.hash);
+      setLastOutSymbol(outSymbol);
+      log("success", `Swap filled -- received ${amountOutText} ${outSymbol}.`, tx.hash);
     } catch (err) {
       const reason = decodeRevertReason(err);
       log("error", `v4 swap failed: ${reason}`);
@@ -95,7 +124,7 @@ export function UniswapPanel() {
         exposure gate.
       </p>
       <div className="mt-4 flex items-center gap-2 text-xs text-neutral-400">
-        <span>{zeroForOne ? "tokenIn" : "tokenOut"}</span>
+        <span>{zeroForOne ? (symbol0 ?? "tokenIn") : (symbol1 ?? "tokenIn")}</span>
         <button
           onClick={() => setZeroForOne((z) => !z)}
           className="rounded-full border border-neutral-700 px-2 py-1 hover:bg-neutral-800"
@@ -103,7 +132,7 @@ export function UniswapPanel() {
         >
           ⇄
         </button>
-        <span>{zeroForOne ? "tokenOut" : "tokenIn"}</span>
+        <span>{zeroForOne ? (symbol1 ?? "tokenOut") : (symbol0 ?? "tokenOut")}</span>
       </div>
       <div className="mt-3 flex gap-2">
         <input
@@ -123,7 +152,11 @@ export function UniswapPanel() {
         </button>
       </div>
       {!address && <p className="mt-2 text-xs text-neutral-600">Connect a wallet to swap.</p>}
-      {lastAmountOut && <p className="mt-2 text-xs text-emerald-400">Received: {lastAmountOut}</p>}
+      {lastAmountOut && (
+        <p className="mt-2 text-xs text-emerald-400">
+          Received: {lastAmountOut} {lastOutSymbol}
+        </p>
+      )}
     </div>
   );
 }
