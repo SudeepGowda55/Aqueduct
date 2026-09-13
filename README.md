@@ -3,6 +3,15 @@
 Built for ETHGlobal, spanning the **1inch: Build an Aqua App** and **Uniswap Hook** tracks, plus
 **The Graph** for the off-chain data pipeline. 
 
+The problem in one picture: a maker can pass three independent, individually-honest risk checks
+and still be over-committed, because nothing looks at all three at once.
+
+<!-- DROP IMAGE HERE: submission-screenshots/multiplier-effect-diagram.png -->
+![Three "safe" checks can still promise more than the wallet actually has](submission-screenshots/multiplier-effect-diagram.png)
+
+*Illustrative example (not live deployment data) — see [Live on Base Sepolia](#live-on-base-sepolia)
+below for the real, on-chain numbers.*
+
 Aqueduct adds a new SwapVM instruction, `_exposureGate1D`, that derates or halts a maker's fill
 based on their *live cross-protocol exposure* — read from an on-chain oracle (`ExposureOracle`)
 fed by an off-chain Graph subgraph that aggregates the maker's committed balances across every
