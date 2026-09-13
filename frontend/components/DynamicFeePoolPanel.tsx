@@ -114,10 +114,16 @@ export function DynamicFeePoolPanel() {
       const tokenInAddr = zeroForOne ? pool.poolKey.currency0 : pool.poolKey.currency1;
       const tokenOutAddr = zeroForOne ? pool.poolKey.currency1 : pool.poolKey.currency0;
       const tokenIn = new Contract(tokenInAddr, ERC20_ABI, signer);
-      const tokenOut = new Contract(tokenOutAddr, ERC20_ABI, signer);
+      // Read via the direct public RPC, not the wallet's own injected provider -- this pool is
+      // dynamic-fee, so the received amount is genuinely net of fee and must come from a real
+      // balance diff (not the SwapVM Swapped event, which reports the pre-fee gross amount). A
+      // wallet-injected provider can return a stale eth_call result immediately after tx.wait(),
+      // making a fresh, fully-filled swap look like it returned zero.
+      const readProvider = getReadProvider();
+      const tokenOutRead = new Contract(tokenOutAddr, ERC20_ABI, readProvider);
       const decimals = await tokenIn.decimals();
       const amountWei = parseUnits(amount, decimals);
-      const balanceOutBefore: bigint = await tokenOut.balanceOf(address);
+      const balanceOutBefore: bigint = await tokenOutRead.balanceOf(address);
       const inSymbol = zeroForOne ? (symbol0 ?? "tokenIn") : (symbol1 ?? "tokenIn");
       const outSymbol = zeroForOne ? (symbol1 ?? "tokenOut") : (symbol0 ?? "tokenOut");
 
@@ -148,7 +154,7 @@ export function DynamicFeePoolPanel() {
       const tx = await swapRouter.swap(key, params, testSettings, "0x");
       await tx.wait();
 
-      const balanceOutAfter: bigint = await tokenOut.balanceOf(address);
+      const balanceOutAfter: bigint = await tokenOutRead.balanceOf(address);
       const amountOutText = formatUnits(balanceOutAfter - balanceOutBefore, decimals);
 
       setLastAmountOut(amountOutText);
