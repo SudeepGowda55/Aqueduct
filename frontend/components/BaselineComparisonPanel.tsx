@@ -121,7 +121,7 @@ export function BaselineComparisonPanel() {
       </p>
 
       <div className="mt-4 flex items-center gap-2 text-xs text-neutral-400">
-        <span>{reversed ? "tokenOut" : "tokenIn"}</span>
+        <span>{snapshot?.symbolIn ?? "tokenIn"}</span>
         <button
           onClick={() => setReversed((r) => !r)}
           className="rounded-full border border-neutral-700 px-2 py-1 hover:bg-neutral-800"
@@ -129,7 +129,7 @@ export function BaselineComparisonPanel() {
         >
           ⇄
         </button>
-        <span>{reversed ? "tokenIn" : "tokenOut"}</span>
+        <span>{snapshot?.symbolOut ?? "tokenOut"}</span>
         <input
           type="number"
           min={0}

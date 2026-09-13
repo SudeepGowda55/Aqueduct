@@ -28,26 +28,42 @@ export function SophisticatedPositionPanel() {
   const [reversed, setReversed] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
   const [lastAmountOut, setLastAmountOut] = useState<string | null>(null);
+  const [lastOutSymbol, setLastOutSymbol] = useState<string>("");
+  const [symbolIn, setSymbolIn] = useState<string | null>(null);
+  const [symbolOut, setSymbolOut] = useState<string | null>(null);
 
   const position = deployment?.sophisticatedPosition;
 
   useEffect(() => {
     if (!position) return;
     let cancelled = false;
-    const provider = getReadProvider();
-    const feed = new Contract(position.priceOracle, PRICE_ORACLE_ABI, provider);
-    Promise.all([feed.decimals(), feed.latestRoundData()])
-      .then(([decimals, roundData]) => {
-        if (cancelled) return;
-        setLivePrice(formatUnits(roundData.answer, decimals));
-      })
-      .catch(() => {
+    void (async () => {
+      const provider = getReadProvider();
+      try {
+        const feed = new Contract(position.priceOracle, PRICE_ORACLE_ABI, provider);
+        const [decimals, roundData] = await Promise.all([feed.decimals(), feed.latestRoundData()]);
+        if (!cancelled) setLivePrice(formatUnits(roundData.answer, decimals));
+      } catch {
         if (!cancelled) setLivePrice(null);
-      });
+      }
+      if (!deployment) return;
+      try {
+        const [symIn, symOut] = await Promise.all([
+          new Contract(deployment.tokenIn, ERC20_ABI, provider).symbol(),
+          new Contract(deployment.tokenOut, ERC20_ABI, provider).symbol(),
+        ]);
+        if (!cancelled) {
+          setSymbolIn(symIn);
+          setSymbolOut(symOut);
+        }
+      } catch {
+        // Falls back to the generic "tokenIn"/"tokenOut" labels below.
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [position]);
+  }, [position, deployment]);
 
   const capPercent = position
     ? ((2e18 - Number(position.maxPriceDecay)) / 1e18 - 1) * 100
@@ -67,10 +83,12 @@ export function SophisticatedPositionPanel() {
       const tokenIn = new Contract(tokenInAddr, ERC20_ABI, signer);
       const decimals = await tokenIn.decimals();
       const amountWei = parseUnits(amount, decimals);
+      const inSymbol = reversed ? (symbolOut ?? "tokenIn") : (symbolIn ?? "tokenIn");
+      const outSymbol = reversed ? (symbolIn ?? "tokenOut") : (symbolOut ?? "tokenOut");
 
       const allowance: bigint = await tokenIn.allowance(address, deployment.swapVM);
       if (allowance < amountWei) {
-        log("info", "Approving SwapVM to spend tokenIn...");
+        log("info", `Approving SwapVM to spend ${inSymbol}...`);
         const approveTx = await tokenIn.approve(deployment.swapVM, amountWei);
         await approveTx.wait();
         log("success", "Approved.", approveTx.hash);
@@ -83,7 +101,7 @@ export function SophisticatedPositionPanel() {
         data: position.order.data,
       };
 
-      log("info", `Swapping ${amount} tokens through Strategy P (price-adjusted + exposure-gated)...`);
+      log("info", `Swapping ${amount} ${inSymbol} for ${outSymbol} through Strategy P (price-adjusted + exposure-gated)...`);
       const tx = await swapVM.swap(order, tokenInAddr, tokenOutAddr, amountWei, EOA_TAKER_TRAITS_AND_DATA);
       const receipt = await tx.wait();
 
@@ -98,7 +116,8 @@ export function SophisticatedPositionPanel() {
         }
       }
       setLastAmountOut(amountOutText);
-      log("success", `Strategy P fill -- received ${amountOutText} tokens.`, tx.hash);
+      setLastOutSymbol(outSymbol);
+      log("success", `Strategy P fill -- received ${amountOutText} ${outSymbol}.`, tx.hash);
     } catch (err) {
       const reason = decodeRevertReason(err);
       log("error", `Strategy P swap failed: ${reason}`);
@@ -148,7 +167,7 @@ export function SophisticatedPositionPanel() {
       </div>
 
       <div className="mt-4 flex items-center gap-2 text-xs text-neutral-400">
-        <span>{reversed ? "tokenOut" : "tokenIn"}</span>
+        <span>{reversed ? (symbolOut ?? "tokenOut") : (symbolIn ?? "tokenIn")}</span>
         <button
           onClick={() => setReversed((r) => !r)}
           className="rounded-full border border-neutral-700 px-2 py-1 hover:bg-neutral-800"
@@ -156,7 +175,7 @@ export function SophisticatedPositionPanel() {
         >
           ⇄
         </button>
-        <span>{reversed ? "tokenIn" : "tokenOut"}</span>
+        <span>{reversed ? (symbolIn ?? "tokenIn") : (symbolOut ?? "tokenOut")}</span>
       </div>
       <div className="mt-3 flex gap-2">
         <input
@@ -176,7 +195,11 @@ export function SophisticatedPositionPanel() {
         </button>
       </div>
       {!address && <p className="mt-2 text-xs text-neutral-600">Connect a wallet to swap.</p>}
-      {lastAmountOut && <p className="mt-2 text-xs text-emerald-400">Received: {lastAmountOut}</p>}
+      {lastAmountOut && (
+        <p className="mt-2 text-xs text-emerald-400">
+          Received: {lastAmountOut} {lastOutSymbol}
+        </p>
+      )}
     </div>
   );
 }

@@ -35,9 +35,33 @@ export function DynamicFeePoolPanel() {
   const [zeroForOne, setZeroForOne] = useState(true);
   const [isSwapping, setIsSwapping] = useState(false);
   const [lastAmountOut, setLastAmountOut] = useState<string | null>(null);
+  const [lastOutSymbol, setLastOutSymbol] = useState<string>("");
+  const [symbol0, setSymbol0] = useState<string | null>(null);
+  const [symbol1, setSymbol1] = useState<string | null>(null);
 
   const pool = deployment?.dynamicFeePool;
   const v4 = deployment?.v4;
+
+  useEffect(() => {
+    if (!pool) return;
+    let cancelled = false;
+    const provider = getReadProvider();
+    Promise.all([
+      new Contract(pool.poolKey.currency0, ERC20_ABI, provider).symbol(),
+      new Contract(pool.poolKey.currency1, ERC20_ABI, provider).symbol(),
+    ])
+      .then(([sym0, sym1]) => {
+        if (cancelled) return;
+        setSymbol0(sym0);
+        setSymbol1(sym1);
+      })
+      .catch(() => {
+        // Falls back to the generic "tokenIn"/"tokenOut" labels below.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pool]);
 
   const readOnChainState = useCallback(async () => {
     if (!deployment || !pool || !v4) return;
@@ -94,10 +118,12 @@ export function DynamicFeePoolPanel() {
       const decimals = await tokenIn.decimals();
       const amountWei = parseUnits(amount, decimals);
       const balanceOutBefore: bigint = await tokenOut.balanceOf(address);
+      const inSymbol = zeroForOne ? (symbol0 ?? "tokenIn") : (symbol1 ?? "tokenIn");
+      const outSymbol = zeroForOne ? (symbol1 ?? "tokenOut") : (symbol0 ?? "tokenOut");
 
       const allowance: bigint = await tokenIn.allowance(address, v4.swapRouter);
       if (allowance < amountWei) {
-        log("info", "Approving the v4 swap router to spend tokenIn...");
+        log("info", `Approving the v4 swap router to spend ${inSymbol}...`);
         const approveTx = await tokenIn.approve(v4.swapRouter, amountWei);
         await approveTx.wait();
         log("success", "Approved.", approveTx.hash);
@@ -118,7 +144,7 @@ export function DynamicFeePoolPanel() {
       };
       const testSettings = { takeClaims: false, settleUsingBurn: false };
 
-      log("info", `Swapping ${amount} tokens through the risk-adjusted dynamic-fee v4 pool...`);
+      log("info", `Swapping ${amount} ${inSymbol} for ${outSymbol} through the risk-adjusted dynamic-fee v4 pool...`);
       const tx = await swapRouter.swap(key, params, testSettings, "0x");
       await tx.wait();
 
@@ -126,7 +152,8 @@ export function DynamicFeePoolPanel() {
       const amountOutText = formatUnits(balanceOutAfter - balanceOutBefore, decimals);
 
       setLastAmountOut(amountOutText);
-      log("success", `Swap filled -- received ${amountOutText} tokens (fee applied).`, tx.hash);
+      setLastOutSymbol(outSymbol);
+      log("success", `Swap filled -- received ${amountOutText} ${outSymbol} (fee applied).`, tx.hash);
       await readOnChainState();
     } catch (err) {
       const reason = decodeRevertReason(err);
@@ -183,7 +210,7 @@ export function DynamicFeePoolPanel() {
       </button>
 
       <div className="mt-4 flex items-center gap-2 text-xs text-neutral-400">
-        <span>{zeroForOne ? "tokenIn" : "tokenOut"}</span>
+        <span>{zeroForOne ? (symbol0 ?? "tokenIn") : (symbol1 ?? "tokenIn")}</span>
         <button
           onClick={() => setZeroForOne((z) => !z)}
           className="rounded-full border border-neutral-700 px-2 py-1 hover:bg-neutral-800"
@@ -191,7 +218,7 @@ export function DynamicFeePoolPanel() {
         >
           ⇄
         </button>
-        <span>{zeroForOne ? "tokenOut" : "tokenIn"}</span>
+        <span>{zeroForOne ? (symbol1 ?? "tokenOut") : (symbol0 ?? "tokenOut")}</span>
       </div>
       <div className="mt-3 flex gap-2">
         <input
@@ -211,7 +238,11 @@ export function DynamicFeePoolPanel() {
         </button>
       </div>
       {!address && <p className="mt-2 text-xs text-neutral-600">Connect a wallet to swap or refresh the fee.</p>}
-      {lastAmountOut && <p className="mt-2 text-xs text-emerald-400">Received: {lastAmountOut} (net of fee)</p>}
+      {lastAmountOut && (
+        <p className="mt-2 text-xs text-emerald-400">
+          Received: {lastAmountOut} {lastOutSymbol} (net of fee)
+        </p>
+      )}
     </div>
   );
 }
