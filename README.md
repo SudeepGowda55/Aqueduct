@@ -8,8 +8,6 @@ and still be over-committed, because nothing looks at all three at once.
 
 <img width="923" height="809" alt="Screenshot 2026-09-13 at 6 32 52 PM" src="https://github.com/user-attachments/assets/bd1d5087-2ca6-4c7b-a576-b508cdf6e603" />
 
-![Three "safe" checks can still promise more than the wallet actually has](submission-screenshots/multiplier-effect-diagram.png)
-
 *Illustrative example (not live deployment data) — see [Live on Base Sepolia](#live-on-base-sepolia)
 below for the real, on-chain numbers.*
 
