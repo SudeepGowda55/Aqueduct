@@ -2,6 +2,7 @@
 
 import type { CSSProperties, ReactNode } from "react";
 import { useCountUp, useReveal } from "@/lib/motion";
+import { SplitWords } from "./SplitWords";
 
 export function Reveal({
   children,
@@ -44,7 +45,9 @@ export function SectionHead({
       </div>
       <div>
         <p className="eyebrow">{eyebrow}</p>
-        <h2 className="display mt-3 text-4xl text-(--ink) md:text-5xl">{title}</h2>
+        <h2 className="display mt-3 text-4xl text-(--ink) md:text-5xl">
+          {typeof title === "string" ? <SplitWords text={title} /> : title}
+        </h2>
         {children && <div className="mt-4 max-w-2xl text-[15px] leading-relaxed text-(--ink-soft)">{children}</div>}
       </div>
     </Reveal>

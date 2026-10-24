@@ -1,107 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type CSSProperties } from "react";
-import { AqueductScene } from "@/components/site/AqueductScene";
+import { type CSSProperties } from "react";
+import { HeroStory } from "@/components/hero/HeroStory";
+import { Marquee } from "@/components/site/Marquee";
 import { CountUp, Reveal, SectionHead } from "@/components/site/Reveal";
 import { useDeployment } from "@/lib/DeploymentProvider";
-import { BAND_META, repoFile } from "@/lib/site";
-import { useLiveExposure } from "@/lib/useLiveExposure";
-import { fillFraction } from "@/lib/xyc";
-import { exposureBand } from "@/lib/constants";
-
-const PREVIEWS = [
-  { key: "live", label: "Live oracle" },
-  { key: 7000, label: "Preview 70%" },
-  { key: 9500, label: "Preview 95%" },
-] as const;
-
-type PreviewKey = (typeof PREVIEWS)[number]["key"];
-
-function Hero() {
-  const live = useLiveExposure();
-  const { deployment } = useDeployment();
-  const [mode, setMode] = useState<PreviewKey>("live");
-
-  const bps = mode === "live" ? live.bps : mode;
-  const fill = bps === null ? 1 : fillFraction(bps, live.maxBps, live.haltBps);
-  const band = bps === null ? null : exposureBand(bps, live.maxBps, live.haltBps);
-  const short = deployment ? `${deployment.maker.slice(0, 6)}…${deployment.maker.slice(-4)}` : "…";
-
-  return (
-    <section className="relative overflow-hidden">
-      <div className="mx-auto max-w-6xl px-4 pt-14 sm:px-6 md:pt-20">
-        <Reveal>
-          <p className="eyebrow">1inch Aqua · SwapVM · Uniswap v4 · The Graph — live on Base Sepolia</p>
-        </Reveal>
-        <Reveal delay={80}>
-          <h1 className="display mt-5 max-w-4xl text-[clamp(2.75rem,8vw,6.5rem)]">
-            Liquidity behind a gate that <span className="text-(--water) italic">only closes.</span>
-          </h1>
-        </Reveal>
-        <Reveal delay={180}>
-          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-(--ink-soft)">
-            Aqueduct adds <code>_exposureGate1D</code> to SwapVM. It reads a maker&apos;s live, cross-strategy
-            exposure and derates or halts their fill, whether the swap goes direct through 1inch SwapVM or
-            through a Uniswap v4 pool. A wrong, stale or malicious reading can only make the maker quote more
-            conservatively. Never more.
-          </p>
-        </Reveal>
-        <Reveal delay={260} className="mt-8 flex flex-wrap gap-3">
-          <Link href="/mechanism" className="btn btn-aqua">
-            See how the gate works →
-          </Link>
-          <Link href="/console" className="btn btn-ghost">
-            Open the live console
-          </Link>
-        </Reveal>
-      </div>
-
-      <Reveal delay={200} className="mx-auto mt-10 max-w-6xl px-2 sm:px-6">
-        <AqueductScene fill={fill} className="h-auto w-full" />
-      </Reveal>
-
-      <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        <div className="mt-2 flex flex-col gap-4 border-t border-(--line) pt-5 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Gate reading">
-            {PREVIEWS.map((p) => (
-              <button
-                key={p.key}
-                onClick={() => setMode(p.key)}
-                aria-pressed={mode === p.key}
-                className={`rounded-full border px-3.5 py-1.5 font-mono text-xs transition-all duration-300 ${
-                  mode === p.key
-                    ? "border-(--ink) bg-(--ink) text-(--paper)"
-                    : "border-(--line-strong) text-(--ink-soft) hover:border-(--ink)"
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          <p className="font-mono text-xs leading-relaxed text-(--ink-faint)">
-            {mode === "live" ? (
-              live.bps === null ? (
-                "Reading ExposureOracle on Base Sepolia…"
-              ) : (
-                <>
-                  <span className="live-dot mr-2 align-middle" style={{ color: band ? BAND_META[band].color : undefined }} />
-                  LIVE · ExposureOracle reports <b className="text-(--ink)">{(live.bps / 100).toFixed(1)}%</b> for
-                  maker {short} · derate above {live.maxBps / 100}%, halt at {live.haltBps / 100}%
-                </>
-              )
-            ) : (
-              <>
-                PREVIEW · simulated reading of <b className="text-(--ink)">{(Number(mode) / 100).toFixed(0)}%</b>, same
-                math as ExposureGate.sol · {band ? BAND_META[band].long : ""}
-              </>
-            )}
-          </p>
-        </div>
-      </div>
-    </section>
-  );
-}
+import { repoFile } from "@/lib/site";
 
 const ILLUSTRATIVE = [
   { name: "Strategy A", pct: 60 },
@@ -112,7 +17,7 @@ const ILLUSTRATIVE = [
 function Problem() {
   return (
     <section className="mx-auto mt-28 max-w-6xl px-4 sm:px-6">
-      <SectionHead numeral="I" eyebrow="The problem" title={<>Three honest checks. One over-committed maker.</>}>
+      <SectionHead numeral="I" eyebrow="The problem" title="Three honest checks. One over-committed maker.">
         Aqua lets one wallet back several strategies at once. Each strategy checks its own commitment
         against the wallet and passes. Nothing looks at all of them together, so the maker can still be
         committed far beyond what they hold.
@@ -260,7 +165,7 @@ const FAILURES = [
 
 function FailsClosed() {
   return (
-    <section className="mt-32 bg-(--ink) py-24 text-(--paper)">
+    <section className="bg-(--ink) py-24 text-(--paper)">
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         <Reveal>
           <p className="eyebrow text-[#a99b83]!">III · The one property</p>
@@ -277,10 +182,16 @@ function FailsClosed() {
             <Reveal as="li" key={f} delay={i * 60}>
               <Link
                 href="/safety"
-                className="flex h-full items-center justify-between gap-3 rounded-xl border border-[#3a342b] px-4 py-4 text-sm transition-colors duration-300 hover:border-(--water-bright) hover:bg-[#1f1c16]"
+                className="relative flex h-full items-center justify-between gap-3 overflow-hidden rounded-xl border border-[#3a342b] px-4 py-4 text-sm transition-colors duration-300 hover:border-(--water-bright) hover:bg-[#1f1c16]"
+                style={{ "--d": `${i * 120}ms` } as CSSProperties}
               >
                 <span>{f}</span>
-                <span className="shrink-0 font-mono text-[10px] text-(--water-bright)">CLOSED</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="chip-label font-mono text-[10px] text-(--water-bright)">CLOSED</span>
+                  <span className="relative block h-7 w-3 overflow-hidden rounded-sm bg-[#2a251f]">
+                    <span className="chip-gate absolute inset-0 rounded-sm bg-(--water-bright)" />
+                  </span>
+                </span>
               </Link>
             </Reveal>
           ))}
@@ -345,12 +256,24 @@ function LiveFacts() {
   );
 }
 
+const FLOW = [
+  "Every failure mode fails closed",
+  "Monotonic by construction",
+  "Same number on both venues",
+  "The oracle can lie, the fill can't grow",
+  "Risk travels with the strategy",
+];
+
 export function HomeStory() {
   return (
     <>
-      <Hero />
+      <HeroStory />
+      <Marquee items={FLOW} />
       <Problem />
       <Pieces />
+      <div className="mt-28">
+        <Marquee items={["_exposureGate1D", "ExposureOracle", "AquaV4Hook", "Aqua.safeBalances", "The Graph · ExposurePosition"]} dark />
+      </div>
       <FailsClosed />
       <LiveFacts />
     </>

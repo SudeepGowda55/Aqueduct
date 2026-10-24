@@ -462,7 +462,7 @@ export function MechanismStory() {
   return (
     <>
       <section className="mx-auto max-w-6xl px-4 pt-14 sm:px-6 md:pt-20">
-        <SectionHead numeral="I" eyebrow="Mechanism" title={<>A gate with no position above the rim.</>}>
+        <SectionHead numeral="I" eyebrow="Mechanism" title="A gate with no position above the rim.">
           <code>_exposureGate1D</code> runs after the swap-pricing instruction. At or below{" "}
           <code>maxExposureBps</code> it does nothing. Between max and halt it scales the fill down linearly. At{" "}
           <code>haltExposureBps</code> or above it reverts. There is no branch where it can make the fill bigger.

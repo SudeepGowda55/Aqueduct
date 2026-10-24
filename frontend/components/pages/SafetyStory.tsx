@@ -98,7 +98,7 @@ export function SafetyStory() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 pt-14 sm:px-6 md:pt-20">
-      <SectionHead numeral="I" eyebrow="Threat model" title={<>Pick a failure. Watch it fail closed.</>}>
+      <SectionHead numeral="I" eyebrow="Threat model" title="Pick a failure. Watch it fail closed.">
         Every row below ends in either a strictly smaller fill or no fill at all, never in a taker getting more than
         the maker&apos;s unsigned SwapVM program authorized. That&apos;s why none of the parts need to be trusted on
         their own.

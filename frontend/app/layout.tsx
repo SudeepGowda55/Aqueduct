@@ -4,6 +4,8 @@ import { Providers } from "@/components/site/Providers";
 import { pageMetadata, SITE } from "@/lib/site";
 import { SiteFooter } from "@/components/site/SiteFooter";
 import { SiteNav } from "@/components/site/SiteNav";
+import { RouteCurtain } from "@/components/site/RouteCurtain";
+import { WaterCursor } from "@/components/site/WaterCursor";
 import "./globals.css";
 
 const display = Bricolage_Grotesque({
@@ -39,6 +41,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <SiteNav />
           <main className="flex-1">{children}</main>
           <SiteFooter />
+          <RouteCurtain />
+          <WaterCursor />
         </Providers>
       </body>
     </html>
