@@ -25,7 +25,7 @@ export const SITE = {
   url: "https://aqueduct-protocol.vercel.app",
   name: "Aqueduct",
   tagline: "exposure-gated Aqua liquidity",
-  description: "Exposure-gated Aqua liquidity, backing both a direct SwapVM swap and a Uniswap v4 pool.",
+  description: "Exposure-gated Aqua liquidity: a new SwapVM instruction derates or halts a maker's fill from live cross-protocol exposure, on SwapVM and Uniswap v4.",
 } as const;
 
 export const OG_IMAGE = { url: "/og.png", width: 1200, height: 627, alt: "Aqueduct — liquidity behind a gate that only closes" };
