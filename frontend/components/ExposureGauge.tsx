@@ -73,7 +73,7 @@ export function ExposureGauge() {
           strokeDashoffset={dashOffset}
           className={`${style.ring} transition-[stroke-dashoffset] duration-500`}
         />
-        <text x="64" y="64" textAnchor="middle" dominantBaseline="middle" className="rotate-90 fill-neutral-100 text-2xl font-semibold" style={{ transform: "rotate(90deg)", transformOrigin: "64px 64px" }}>
+        <text x="64" y="64" textAnchor="middle" dominantBaseline="middle" className="fill-neutral-100 text-2xl font-semibold" style={{ transform: "rotate(90deg)", transformOrigin: "64px 64px" }}>
           {pct.toFixed(1)}%
         </text>
       </svg>
@@ -82,7 +82,7 @@ export function ExposureGauge() {
           {style.label}
         </span>
         <p className="mt-2 text-xs text-neutral-500">
-          Maker: <span className="font-mono">{deployment.maker}</span>
+          Maker: <span className="break-all font-mono">{deployment.maker}</span>
         </p>
         <p className="text-xs text-neutral-500">
           Thresholds: derate at {(deployment.maxExposureBps / 100).toFixed(0)}%, halt at{" "}

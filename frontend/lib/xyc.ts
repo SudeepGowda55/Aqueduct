@@ -35,3 +35,10 @@ export function applyExposureGate(
   const derateFactor = ONE - (overage * ONE) / band;
   return { amountOut: (ungatedAmountOut * derateFactor) / ONE, halted: false };
 }
+
+/** The same derate factor as `applyExposureGate`, as a 0..1 float for visuals (1 = full fill). */
+export function fillFraction(exposureBps: number, maxExposureBps: number, haltExposureBps: number): number {
+  if (exposureBps <= maxExposureBps) return 1;
+  if (exposureBps >= haltExposureBps) return 0;
+  return 1 - (exposureBps - maxExposureBps) / (haltExposureBps - maxExposureBps);
+}

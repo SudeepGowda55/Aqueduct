@@ -93,8 +93,8 @@ export function CrossVenueProofPanel() {
       : "border-neutral-800";
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
-      <h3 className="text-sm font-semibold text-neutral-200">Same strategy. Same risk policy. Different execution venue.</h3>
+    <div className="panel p-5">
+      <h3 className="panel-title">Same strategy. Same risk policy. Different execution venue.</h3>
       <div className="mt-3 space-y-1 text-xs text-neutral-500">
         <p>
           Maker: <span className="font-mono text-neutral-400">{deployment.maker}</span>
@@ -116,7 +116,7 @@ export function CrossVenueProofPanel() {
           min={0}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          className="w-28 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200"
+          className="w-28 field"
         />
       </div>
 

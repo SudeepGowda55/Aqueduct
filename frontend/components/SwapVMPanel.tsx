@@ -103,8 +103,8 @@ export function SwapVMPanel() {
   };
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
-      <h3 className="text-sm font-semibold text-neutral-200">Swap directly via SwapVM</h3>
+    <div className="panel p-5">
+      <h3 className="panel-title">Swap directly via SwapVM</h3>
       <p className="mt-1 text-xs text-neutral-500">
         Calls <code>swapVM.swap(...)</code> straight from your connected wallet -- no contract
         needed as taker (SwapVM&apos;s <code>useTransferFromAndAquaPush</code> flag handles the
@@ -114,7 +114,7 @@ export function SwapVMPanel() {
         <span>{reversed ? (symbolOut ?? "tokenOut") : (symbolIn ?? "tokenIn")}</span>
         <button
           onClick={() => setReversed((r) => !r)}
-          className="rounded-full border border-neutral-700 px-2 py-1 hover:bg-neutral-800"
+          className="grid h-8 w-8 place-items-center rounded-full border border-neutral-700 text-sm transition-transform duration-500 hover:rotate-180 hover:border-cyan-600"
           title="Flip direction"
         >
           ⇄
@@ -127,13 +127,13 @@ export function SwapVMPanel() {
           min={0}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          className="flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200"
+          className="flex-1 field"
           placeholder="Amount"
         />
         <button
           onClick={swap}
           disabled={!canSwap || isSwapping}
-          className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-50"
+          className="btn btn-aqua"
         >
           {isSwapping ? "Swapping..." : "Swap"}
         </button>

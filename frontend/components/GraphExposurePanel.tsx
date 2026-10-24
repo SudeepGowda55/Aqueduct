@@ -104,8 +104,8 @@ export function GraphExposurePanel() {
       : "";
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
-      <h2 className="text-base font-semibold">Exposure, from The Graph</h2>
+    <div className="panel p-5">
+      <h2 className="panel-title">Exposure, from The Graph</h2>
       <p className="mt-1 text-xs text-neutral-500">
         One <span className="font-mono">exposurePositions</span> query against the deployed subgraph joins Aqua
         commitments, oracle readings and v4 swaps — no RPC calls on this panel. Refreshes every 60s (cached).
@@ -168,7 +168,7 @@ export function GraphExposurePanel() {
             Exposure history ({snapshots!.length} indexed readings, oldest → latest)
           </p>
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-1 h-20 w-full rounded-lg bg-neutral-950 p-1">
-            <polyline points={spark} fill="none" stroke="#38bdf8" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+            <polyline points={spark} fill="none" stroke="var(--water)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
           </svg>
         </div>
       )}

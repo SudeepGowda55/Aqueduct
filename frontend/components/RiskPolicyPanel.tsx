@@ -23,8 +23,8 @@ export function RiskPolicyPanel() {
   const activeHalt = deployment.haltExposureBps / 100;
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
-      <h3 className="text-sm font-semibold text-neutral-200">Maker risk policy</h3>
+    <div className="panel p-5">
+      <h3 className="panel-title">Maker risk policy</h3>
       <p className="mt-1 text-xs text-neutral-500">
         <code>maxExposureBps</code> and <code>haltExposureBps</code> are arguments the maker
         chooses when building their SwapVM program -- a reusable risk-control primitive, not a

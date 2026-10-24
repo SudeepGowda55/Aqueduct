@@ -124,9 +124,9 @@ export function GraphVerdictBanner() {
   const pct = coverage.total > 0 ? Math.round((coverage.cross / coverage.total) * 100) : 0;
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
+    <div className="panel p-5">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-base font-semibold">Maker safety</h2>
+        <h2 className="panel-title">Maker safety</h2>
         {verdict && (
           <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] ${VERDICT_STYLE[verdict] ?? ""}`}>
             {verdict}

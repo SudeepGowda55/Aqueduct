@@ -15,7 +15,7 @@ export function ConnectWallet() {
         <button
           onClick={connect}
           disabled={isConnecting}
-          className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-50"
+          className="btn btn-aqua"
         >
           {isConnecting ? "Connecting..." : "Connect Wallet"}
         </button>

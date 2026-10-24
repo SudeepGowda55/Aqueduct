@@ -45,8 +45,8 @@ export function KeeperPanel() {
   };
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
-      <h3 className="text-sm font-semibold text-neutral-200">Keeper control (demo)</h3>
+    <div className="panel p-5">
+      <h3 className="panel-title">Keeper control (demo)</h3>
       <p className="mt-1 text-xs text-neutral-500">
         Stands in for the off-chain Graph pipeline (see <code>subgraph/</code> +{" "}
         <code>keeper/pushExposure.ts</code>), which would push this same value automatically in
@@ -75,7 +75,7 @@ export function KeeperPanel() {
           placeholder="Custom bps (0-10000)"
           value={customBps}
           onChange={(e) => setCustomBps(e.target.value)}
-          className="w-40 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-xs text-neutral-200"
+          className="w-52 field"
         />
         <button
           onClick={() => customBps && push(Number(customBps))}

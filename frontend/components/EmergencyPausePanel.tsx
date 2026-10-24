@@ -75,8 +75,8 @@ export function EmergencyPausePanel() {
 
   if (supported === false) {
     return (
-      <div className="rounded-xl border border-dashed border-neutral-800 bg-neutral-900/30 p-5">
-        <h3 className="text-sm font-semibold text-neutral-400">Maker emergency halt</h3>
+      <div className="panel panel-dashed p-5">
+        <h3 className="panel-title text-neutral-500">Maker emergency halt</h3>
         <p className="mt-1 text-xs text-neutral-600">
           Not live on this deployment yet -- <code>ExposureOracle.setPausedByMaker</code> was added
           after Base Sepolia address above was deployed. Fully implemented and tested (see{" "}
@@ -88,8 +88,8 @@ export function EmergencyPausePanel() {
   }
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
-      <h3 className="text-sm font-semibold text-neutral-200">Maker emergency halt</h3>
+    <div className="panel p-5">
+      <h3 className="panel-title">Maker emergency halt</h3>
       <p className="mt-1 text-xs text-neutral-500">
         A third, independent layer on top of keeper authorization and gate monotonicity: if the
         maker distrusts the exposure feed itself -- not just one bad reading -- they can halt every

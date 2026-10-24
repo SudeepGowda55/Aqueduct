@@ -742,7 +742,12 @@ npm install
 npm run dev
 ```
 
-then open `http://localhost:3000` the same way. The
+then open `http://localhost:3000` the same way. The site is split into five pages:
+**Story** (`/`, the pitch, with a hero aqueduct whose sluice gate tracks the live oracle reading),
+**Mechanism** (`/mechanism`, a gate simulator using the same derate math as `ExposureGate.sol`
+against Strategy A's live reserves), **Live proof** (`/proof`, the read-only RPC and subgraph
+panels), **Safety** (`/safety`, the threat model) and **Console** (`/console`, wallet, keeper,
+swap, dynamic-fee and emergency-halt controls). The
 read-only dashboard data (exposure gauge, keeper panel) uses Base's own public RPC
 (`https://sepolia.base.org`) so it works even before a wallet connects; it never uses a personal
 Alchemy/Infura key client-side, since that file ships to every visitor's browser. It shows:

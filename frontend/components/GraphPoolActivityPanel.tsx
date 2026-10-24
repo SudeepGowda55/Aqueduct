@@ -121,8 +121,8 @@ export function GraphPoolActivityPanel() {
   }, [poolFilter]);
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
-      <h2 className="text-base font-semibold">Pool activity, from The Graph (Messari shape)</h2>
+    <div className="panel p-5">
+      <h2 className="panel-title">Pool activity, from The Graph (Messari shape)</h2>
       <p className="mt-1 text-xs text-neutral-500">
         <span className="font-mono">liquidityPools</span> + <span className="font-mono">swaps</span> in
         Messari DEX-AMM field names — the same query pattern works against any standardized DEX

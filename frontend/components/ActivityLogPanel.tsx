@@ -12,9 +12,9 @@ export function ActivityLogPanel() {
   const { entries, clear } = useActivityLog();
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-5">
+    <div className="panel p-5">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-neutral-200">Activity</h3>
+        <h3 className="panel-title">Activity</h3>
         {entries.length > 0 && (
           <button onClick={clear} className="text-xs text-neutral-600 hover:text-neutral-400">
             Clear

@@ -56,7 +56,7 @@ export function DeploymentAddresses() {
   }
 
   return (
-    <details className="rounded-xl border border-neutral-800 bg-neutral-900/30 p-4 text-xs">
+    <details className="panel p-4 text-xs">
       <summary className="cursor-pointer text-neutral-400">Deployed contract addresses</summary>
       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-neutral-500">
         {rows.map(([label, addr]) => (

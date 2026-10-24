@@ -102,8 +102,8 @@ export function AggregateExposurePanel() {
   const copy = BAND_COPY[band];
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
-      <h3 className="text-sm font-semibold text-neutral-200">Why this maker is exposure-gated</h3>
+    <div className="panel p-5">
+      <h3 className="panel-title">Why this maker is exposure-gated</h3>
       <p className="mt-1 text-xs text-neutral-500">
         Aqua lets one wallet back several strategies at once (the &quot;multiplier effect&quot;).
         Committed amounts below are live on-chain reads of this maker&apos;s actual shipped

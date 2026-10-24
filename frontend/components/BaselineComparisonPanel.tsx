@@ -112,8 +112,8 @@ export function BaselineComparisonPanel() {
       : null;
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5">
-      <h3 className="text-sm font-semibold text-neutral-200">Ungated vs. exposure-gated</h3>
+    <div className="panel p-5">
+      <h3 className="panel-title">Ungated vs. exposure-gated</h3>
       <p className="mt-1 text-xs text-neutral-500">
         The same swap amount, priced two ways from the maker&apos;s live pool reserves: what the
         constant-product curve alone would give up (no exposure gate), and what it actually gives
@@ -124,7 +124,7 @@ export function BaselineComparisonPanel() {
         <span>{snapshot?.symbolIn ?? "tokenIn"}</span>
         <button
           onClick={() => setReversed((r) => !r)}
-          className="rounded-full border border-neutral-700 px-2 py-1 hover:bg-neutral-800"
+          className="grid h-8 w-8 place-items-center rounded-full border border-neutral-700 text-sm transition-transform duration-500 hover:rotate-180 hover:border-cyan-600"
           title="Flip direction"
         >
           ⇄
@@ -135,7 +135,7 @@ export function BaselineComparisonPanel() {
           min={0}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          className="ml-auto w-28 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200"
+          className="ml-auto w-28 field"
         />
       </div>
 
