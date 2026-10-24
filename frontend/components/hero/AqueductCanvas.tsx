@@ -415,6 +415,8 @@ function Spray() {
 }
 
 function Gate() {
+  const gl = useThree((s) => s.gl);
+  const frames = useRef(0);
   const plate = useRef<THREE.Mesh>(null);
   const rod = useRef<THREE.Mesh>(null);
   const wheel = useRef<THREE.Group>(null);
@@ -426,7 +428,11 @@ function Gate() {
 
   useFrame((_, dt) => {
     // Heavy gate: eases a little slower than the water so it visibly "pushes" the level.
+    const prev = f.current;
     f.current += (storeFill() - f.current) * Math.min(1, dt * 2.2);
+    // Everything else that casts a shadow is static stone: re-render the shadow map only while the
+    // gate is moving (plus the first few frames while the scene settles).
+    if (Math.abs(f.current - prev) > 1e-4 || frames.current++ < 4) gl.shadowMap.needsUpdate = true;
     const bottom = BED_TOP + (DEPTH + 0.06) * f.current;
     if (plate.current) plate.current.position.y = bottom + PLATE_H / 2;
     if (rod.current) {
@@ -482,6 +488,44 @@ function Gate() {
   );
 }
 
+/// Steps the render resolution down (never back up, to avoid oscillating) while frames stay slow,
+/// so weaker GPUs keep the water moving smoothly instead of dropping frames.
+function AdaptiveDpr() {
+  const setDpr = useThree((s) => s.setDpr);
+  const dpr = useThree((s) => s.viewport.dpr);
+  const acc = useRef({ t: 0, n: 0 });
+  useFrame((_, dt) => {
+    const a = acc.current;
+    a.t += dt;
+    a.n += 1;
+    if (a.t < 1.5) return;
+    const avg = a.t / a.n;
+    a.t = 0;
+    a.n = 0;
+    if (avg > 1 / 45 && dpr > 1) setDpr(Math.max(1, Math.round((dpr - 0.25) * 4) / 4));
+  });
+  return null;
+}
+
+/// Build every stream tube while the browser is idle, so a fill change never builds geometry mid-scroll.
+function usePrebuildTubes() {
+  useEffect(() => {
+    const jobs: [number, number][] = [];
+    for (let s = 1; s <= 20; s++) jobs.push([0, s], [1, s]);
+    const ric = window.requestIdleCallback ?? ((cb: IdleRequestCallback) => window.setTimeout(() => cb({ timeRemaining: () => 8, didTimeout: false }), 50));
+    let id = 0;
+    const work: IdleRequestCallback = (deadline) => {
+      while (jobs.length && deadline.timeRemaining() > 2) {
+        const [i, s] = jobs.pop()!;
+        tube(i, s);
+      }
+      if (jobs.length) id = ric(work);
+    };
+    id = ric(work);
+    return () => (window.cancelIdleCallback ?? window.clearTimeout)(id);
+  }, []);
+}
+
 function Lights() {
   return (
     <>
@@ -491,7 +535,7 @@ function Lights() {
         intensity={2.8}
         color="#fff1dc"
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[1024, 1024]}
         shadow-camera-left={-22}
         shadow-camera-right={22}
         shadow-camera-top={16}
@@ -506,21 +550,27 @@ function Lights() {
   );
 }
 
-export default function AqueductCanvas({ active }: { active: boolean }) {
+export default function AqueductCanvas({ active, onReady }: { active: boolean; onReady?: () => void }) {
+  usePrebuildTubes();
   return (
     <Canvas
       shadows={{ type: THREE.PCFShadowMap }}
-      dpr={[1, 1.75]}
+      dpr={[1, 1.5]}
       frameloop={active ? "always" : "never"}
       camera={{ fov: 32, near: 0.5, far: 120, position: [-17, 10, 24] }}
       gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
-      onCreated={({ scene }) => {
+      onCreated={({ scene, gl }) => {
         scene.fog = new THREE.Fog("#f3ede1", 34, 80);
+        gl.shadowMap.autoUpdate = false;
+        gl.shadowMap.needsUpdate = true;
+        // Let the first frame (shader compile) land before fading the canvas in.
+        requestAnimationFrame(() => requestAnimationFrame(() => onReady?.()));
       }}
       aria-label="3D aqueduct: liquidity flows through the exposure gate into the SwapVM and Uniswap v4 outlets"
       role="img"
     >
       <Lights />
+      <AdaptiveDpr />
       <Rig />
       <Structure />
       <Water />

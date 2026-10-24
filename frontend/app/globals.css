@@ -88,17 +88,27 @@
 }
 
 
-body {
+html {
   background: var(--paper);
+}
+body {
   color: var(--ink);
   font-family: var(--font-sans), system-ui, sans-serif;
-  /* Faint travertine grain + survey grid, drawn once, no image requests. */
+}
+/* Faint survey grid on its own fixed, composited layer. (`background-attachment: fixed` on body
+   would repaint the whole viewport on every scroll frame.) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background-image:
     radial-gradient(circle at 20% 0%, rgba(58, 168, 173, 0.08), transparent 45%),
     linear-gradient(to right, rgba(196, 180, 152, 0.18) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(196, 180, 152, 0.18) 1px, transparent 1px);
   background-size: auto, 64px 64px, 64px 64px;
-  background-attachment: fixed;
+  will-change: transform;
 }
 
 ::selection {
@@ -452,17 +462,14 @@ html.lenis body {
 .chapter {
   opacity: 0;
   transform: translateY(26px);
-  filter: blur(6px);
   transition:
     opacity 0.7s var(--ease-water),
-    transform 0.9s var(--ease-water),
-    filter 0.7s var(--ease-water);
+    transform 0.9s var(--ease-water);
   pointer-events: none;
 }
 .chapter.chapter-on {
   opacity: 1;
   transform: none;
-  filter: none;
 }
 .chapter.chapter-on .pointer-events-auto {
   pointer-events: auto;
@@ -564,7 +571,6 @@ html.lenis body {
   width: 34px;
   height: 34px;
   border: 1.5px solid var(--water);
-  mix-blend-mode: multiply;
 }
 .cursor-dot {
   width: 6px;
@@ -657,9 +663,6 @@ html.lenis body {
   }
   .chip-label {
     opacity: 1;
-  }
-  .chapter {
-    filter: none;
   }
   .marquee-row {
     animation: none;

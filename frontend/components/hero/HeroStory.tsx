@@ -17,7 +17,11 @@ import { heroStore, storeExposure, storeFill } from "./heroStore";
 
 if (typeof window !== "undefined") gsap.registerPlugin(ScrollTrigger);
 
-const AqueductCanvas = dynamic(() => import("./AqueductCanvas"), { ssr: false });
+// Start fetching the 3D chunk as soon as this module evaluates (in parallel with hydration),
+// instead of waiting for the first render to request it.
+const loadCanvas = () => import("./AqueductCanvas");
+if (typeof window !== "undefined") void loadCanvas();
+const AqueductCanvas = dynamic(loadCanvas, { ssr: false });
 
 // Timeline segment lengths (GSAP "duration" units on a scrubbed timeline = share of the scroll).
 const SEG = { move: 1, hold: 0.6 };
@@ -90,7 +94,7 @@ function Hud() {
   }, []);
 
   return (
-    <div className="pointer-events-none w-full max-w-xs rounded-2xl border border-(--line) bg-(--paper)/80 p-4 font-mono text-[11px] text-(--ink-soft) backdrop-blur-md">
+    <div className="pointer-events-none w-full max-w-xs rounded-2xl border border-(--line) bg-(--paper)/95 p-4 font-mono text-[11px] text-(--ink-soft)">
       <div className="flex items-center justify-between">
         <span ref={tag} className="tracking-[0.18em]">LIVE</span>
         <span ref={band} className="font-semibold" />
@@ -119,6 +123,7 @@ export function HeroStory() {
   const [chapter, setChapter] = useState(0);
   const [active, setActive] = useState(true);
   const [mode, setMode] = useState<"pending" | "webgl" | "svg" | "static">("pending");
+  const [canvasReady, setCanvasReady] = useState(false);
 
   // Feed the real reading into the store.
   useEffect(() => {
@@ -190,7 +195,11 @@ export function HeroStory() {
       <div className={isStatic ? "relative flex flex-col-reverse pb-10" : "sticky top-0 h-svh overflow-hidden"}>
         {/* Stage */}
         <div className={isStatic ? "relative mx-auto max-w-6xl px-2" : "absolute inset-0"}>
-          {mode === "webgl" && <AqueductCanvas active={active} />}
+          {mode === "webgl" && (
+            <div className={`absolute inset-0 transition-opacity duration-1000 ${canvasReady ? "opacity-100" : "opacity-0"}`}>
+              <AqueductCanvas active={active} onReady={() => setCanvasReady(true)} />
+            </div>
+          )}
           {(mode === "svg" || isStatic) && (
             <div className={isStatic ? "" : "absolute inset-x-0 bottom-[6vh] mx-auto max-w-5xl px-4 lg:left-[30%]"}>
               <SvgStage />
