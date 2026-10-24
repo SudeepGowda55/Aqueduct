@@ -214,15 +214,16 @@ function Rig() {
   const tp = useMemo(() => new THREE.Vector3(), []);
   const tt = useMemo(() => new THREE.Vector3(), []);
 
-  useEffect(() => {
-    const cam = camera as THREE.PerspectiveCamera;
-    // Keep the subject clear of the text: push it right on desktop, up on phones.
-    if (size.width >= 1024) cam.setViewOffset(size.width, size.height, -size.width * 0.21, 0, size.width, size.height);
-    else cam.setViewOffset(size.width, size.height, 0, -size.height * 0.22, size.width, size.height);
-    cam.updateProjectionMatrix();
-  }, [camera, size]);
+  const side = useRef(heroStore.side);
 
   useFrame(() => {
+    // Keep the subject clear of the copy: on wide screens slide it to whichever side the current
+    // chapter's text isn't on; on phones push it down below the copy.
+    const cam = camera as THREE.PerspectiveCamera;
+    side.current += (heroStore.side - side.current) * 0.05;
+    if (size.width >= 1024) cam.setViewOffset(size.width, size.height, -size.width * 0.21 * side.current, 0, size.width, size.height);
+    else cam.setViewOffset(size.width, size.height, 0, -size.height * 0.22, size.width, size.height);
+
     const c = Math.max(0, Math.min(CAM_KEYS.length - 1, heroStore.cam));
     const i = Math.min(CAM_KEYS.length - 2, Math.floor(c));
     const f = c - i;

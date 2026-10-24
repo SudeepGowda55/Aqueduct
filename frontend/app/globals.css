@@ -668,3 +668,29 @@ html.lenis body {
     animation: none;
   }
 }
+
+/* ---------- Hero story copy, scrolling over the 3D stage ---------- */
+.story-copy {
+  position: relative;
+}
+/* Soft paper glow behind each block so it reads over the scene without a hard card. */
+.story-copy::before {
+  content: "";
+  position: absolute;
+  inset: -8% -10%;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgba(246, 241, 231, 0.88), rgba(246, 241, 231, 0.55) 60%, rgba(246, 241, 231, 0));
+  pointer-events: none;
+}
+/* Huge outline step number behind each chapter. */
+.story-num {
+  position: absolute;
+  right: -0.15em;
+  top: -0.55em;
+  font-size: clamp(7rem, 16vw, 13rem);
+  line-height: 1;
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgba(28, 124, 132, 0.28);
+  pointer-events: none;
+  user-select: none;
+}
